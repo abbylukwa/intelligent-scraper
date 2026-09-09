@@ -29,18 +29,60 @@ async function downloadAlbum(albumUrlOrKeyword, concurrency = 3) {
     return albumId;
 }
 
-async function searchImages(query, site = 'pornpics') {
-    let url;
-    if (site === 'pornpics') {
-        url = `https://www.pornpics.com/search/?q=${encodeURIComponent(query)}`;
-    } else if (site === 'darknaija') {
-        url = `https://darknaija.com/?s=${encodeURIComponent(query)}`;
-    } else {
-        throw new Error('Unsupported site');
+async function searchImages(query, site = 'darknaija') {
+    // Try multiple sites and URL patterns
+    const attempts = [];
+
+    // 1. DarkNaija (already working)
+    attempts.push({
+        site: 'darknaija',
+        url: `https://darknaija.com/?s=${encodeURIComponent(query)}`
+    });
+
+    // 2. PornPics (try different formats)
+    attempts.push({
+        site: 'pornpics',
+        url: `https://www.pornpics.com/search/?q=${encodeURIComponent(query)}`
+    });
+    attempts.push({
+        site: 'pornpics',
+        url: `https://www.pornpics.com/search/?q=${encodeURIComponent(query)}&page=1`
+    });
+
+    // 3. Reddit as fallback (NSFW subreddits)
+    attempts.push({
+        site: 'reddit',
+        url: `https://old.reddit.com/r/boobs/top/.json?limit=20`
+    });
+
+    for (const attempt of attempts) {
+        try {
+            const html = await utils.fetchPage(attempt.url);
+            let imageUrls = [];
+            if (attempt.site === 'reddit') {
+                // Parse JSON response
+                try {
+                    const json = JSON.parse(html);
+                    const posts = json.data.children;
+                    imageUrls = posts
+                        .map(p => p.data.url)
+                        .filter(url => /\.(jpg|jpeg|png|gif|webp)$/i.test(url));
+                } catch (e) {
+                    continue;
+                }
+            } else {
+                imageUrls = await utils.extractImageUrls(html, attempt.url);
+            }
+            if (imageUrls.length > 0) {
+                // Limit to 20 images
+                return imageUrls.slice(0, 20);
+            }
+        } catch (e) {
+            // Try next attempt
+        }
     }
-    const html = await utils.fetchPage(url);
-    const imageUrls = await utils.extractImageUrls(html, url);
-    return imageUrls.slice(0, 20);
+    // If all fail, return empty array
+    return [];
 }
 
 module.exports = {
