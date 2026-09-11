@@ -1,0 +1,20 @@
+FROM node:18-slim
+
+# Install Ollama
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://ollama.com/install.sh | sh
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+# Pull the model at build time (optional, increases build time)
+# RUN ollama serve & sleep 5 && ollama pull qwen2:0.5b && kill %1
+
+EXPOSE 10000
+
+# Start Ollama in background, then start the scraper
+CMD ollama serve & sleep 3 && node server.js
