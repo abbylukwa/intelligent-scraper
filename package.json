@@ -1,7 +1,7 @@
 {
-  "name": "whatsapp-bot-fixed",
-  "version": "27.0.0",
-  "description": "WhatsApp Bot — phone-only admin, scraper bridge, humanized replies",
+  "name": "intelligent-scraper-api",
+  "version": "2.0.0",
+  "description": "Standalone scraper API with Ollama local AI — called by whatsapp-qr-app",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,11 +10,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.8",
     "axios": "^1.7.0",
-    "express": "^4.21.0",
-    "node-cache": "^5.1.2",
-    "pino": "^9.5.0",
-    "qrcode": "^1.5.4"
+    "express": "^4.21.0"
   }
 }
