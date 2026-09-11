@@ -1,24 +1,48 @@
 'use strict';
 
 // ================================================================
-// INTELLIGENT SCRAPER — Standalone API Service
-// node-llama-cpp with SmolLM2-135M (fits Render free tier)
+// INTELLIGENT SCRAPER — API Service + Local LLM Chat
+// Original scraper preserved | SmolLM2 via dynamic import (ESM fix)
 // ================================================================
 
 const express = require('express');
-const fs = require('fs');
+const cors = require('cors');
 const path = require('path');
-const crypto = require('crypto');
+const fs = require('fs');
 const axios = require('axios');
-const { getLlama, LlamaChatSession } = require('node-llama-cpp');
 
+// Original scraper modules (unchanged)
+const album = require('./album');
+const gif = require('./gif');
+const temp = require('./temp');
+
+// ================================================================
+// CONFIG
+// ================================================================
 const PORT = process.env.PORT || 10000;
 const MODEL_URL = process.env.MODEL_URL || 'https://huggingface.co/QuantLLM/SmolLM2-135M-GGUF/resolve/main/SmolLM2-135M-GGUF.Q4_K_M.gguf';
 const MODEL_PATH = path.join(__dirname, 'models', 'smollm2-135m.Q4_K_M.gguf');
 const SCRAPER_LOG_MAX = 300;
 
 // ================================================================
-// MODEL INITIALIZATION
+// LOG BUFFER
+// ================================================================
+const scraperLogs = [];
+
+function pushScraperLog(level, source, message, meta = {}) {
+  const entry = {
+    id: Date.now() + Math.random(),
+    ts: new Date().toISOString(),
+    level, source, message,
+    meta: Object.keys(meta).length ? meta : undefined
+  };
+  scraperLogs.push(entry);
+  if (scraperLogs.length > SCRAPER_LOG_MAX) scraperLogs.shift();
+  console.log(`[${level.toUpperCase()}] [${source}] ${message}`);
+}
+
+// ================================================================
+// LOCAL LLM — SmolLM2 via dynamic import (fixes ESM crash)
 // ================================================================
 let llama = null;
 let model = null;
@@ -31,8 +55,11 @@ async function initModel() {
     if (!fs.existsSync(modelDir)) fs.mkdirSync(modelDir, { recursive: true });
 
     if (!fs.existsSync(MODEL_PATH)) {
-      pushScraperLog('info', 'model', 'Downloading SmolLM2-135M (~90MB)...');
-      const response = await axios.get(MODEL_URL, { responseType: 'stream', timeout: 120000 });
+      pushScraperLog('info', 'model', 'Downloading SmolLM2-135M (~105MB)...');
+      const response = await axios.get(MODEL_URL, {
+        responseType: 'stream',
+        timeout: 300000
+      });
       const writer = fs.createWriteStream(MODEL_PATH);
       response.data.pipe(writer);
       await new Promise((resolve, reject) => {
@@ -42,43 +69,38 @@ async function initModel() {
       pushScraperLog('success', 'model', 'Model downloaded');
     }
 
-    llama = await getLlama();
+    // ── ESM FIX: dynamic import() instead of require() ──
+    const nlc = await import('node-llama-cpp');
+    const { getLlama, LlamaChatSession } = nlc;
+
+    llama = await getLlama({ gpu: false });
     model = await llama.loadModel({ modelPath: MODEL_PATH });
-    context = await model.createContext();
+    context = await model.createContext({ contextSize: 512 });
     modelReady = true;
-    pushScraperLog('success', 'model', 'SmolLM2-135M loaded and ready');
+
+    pushScraperLog('success', 'model', `SmolLM2-135M loaded (ctx=512, CPU-only)`);
   } catch (e) {
     pushScraperLog('error', 'model', `Model init failed: ${e.message}`);
     modelReady = false;
   }
 }
 
-// ================================================================
-// LOG BUFFER
-// ================================================================
-const scraperLogs = [];
-
-function pushScraperLog(level, source, message, meta = {}) {
-  const entry = { id: Date.now() + Math.random(), ts: new Date().toISOString(), level, source, message, meta: Object.keys(meta).length ? meta : undefined };
-  scraperLogs.push(entry);
-  if (scraperLogs.length > SCRAPER_LOG_MAX) scraperLogs.shift();
-  console.log(`[${level.toUpperCase()}] [${source}] ${message}`);
-}
-
-// ================================================================
-// LOCAL AI — SmolLM2
-// ================================================================
 async function askLocalAI(prompt, systemPrompt) {
   if (!modelReady || !context) {
-    pushScraperLog('warn', 'ai', 'Model not ready, cannot generate reply');
+    pushScraperLog('warn', 'ai', 'Model not ready');
     return null;
   }
   const t0 = Date.now();
   try {
+    const nlc = await import('node-llama-cpp');
+    const { LlamaChatSession } = nlc;
     const session = new LlamaChatSession({ contextSequence: context.getSequence() });
     const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}\nAssistant:`;
-    const reply = await session.prompt(fullPrompt, { maxTokens: 150, temperature: 0.8 });
-    pushScraperLog('info', 'ai', `Reply generated in ${Date.now() - t0}ms`);
+    const reply = await session.prompt(fullPrompt, {
+      maxTokens: 150,
+      temperature: 0.8
+    });
+    pushScraperLog('info', 'ai', `Reply in ${Date.now() - t0}ms`);
     return reply?.trim() || null;
   } catch (e) {
     pushScraperLog('error', 'ai', `Generation failed: ${e.message}`);
@@ -87,158 +109,133 @@ async function askLocalAI(prompt, systemPrompt) {
 }
 
 // ================================================================
-// TEMP STORAGE (unchanged)
-// ================================================================
-const TEMP_DIR = path.join(__dirname, 'temp');
-fs.mkdirSync(TEMP_DIR, { recursive: true });
-const registry = new Map();
-const MAX_AGE_MS = 3600000;
-const MAX_ITEMS = 200;
-
-function generateId() { return crypto.randomBytes(8).toString('hex'); }
-
-function cleanup() {
-  const now = Date.now();
-  let removed = 0;
-  for (const [id, entry] of registry) {
-    if (id.startsWith('album_')) continue;
-    if (now - entry.timestamp > MAX_AGE_MS || registry.size > MAX_ITEMS) {
-      try { fs.unlinkSync(entry.path); } catch (e) {}
-      registry.delete(id);
-      removed++;
-    }
-  }
-  if (removed > 0) pushScraperLog('info', 'cleanup', `Removed ${removed} expired files`);
-}
-
-// ================================================================
-// SCRAPER FUNCTIONS — Connect to real sources
-// ================================================================
-async function searchImages(query, source = 'pornpics') {
-  pushScraperLog('info', 'search', `Searching "${query}" on ${source}`);
-  try {
-    // Connect to your actual scraper source
-    // Example: pornpics, darknaija, etc.
-    const searchUrl = `https://www.pornpics.com/search/srch.php?q=${encodeURIComponent(query)}&lang=en`;
-    const response = await axios.get(searchUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 15000
-    });
-    const html = response.data;
-    const matches = html.match(/https:\/\/cdni\.pornpics\.com\/[^"']+/g) || [];
-    const results = matches.slice(0, 20).map(url => ({ url, source: 'pornpics' }));
-    pushScraperLog('info', 'search', `Found ${results.length} results for "${query}"`);
-    return { ok: true, data: { query, results, count: results.length } };
-  } catch (e) {
-    pushScraperLog('error', 'search', `Search failed: ${e.message}`);
-    return { ok: false, error: e.message };
-  }
-}
-
-async function searchGifs(query) {
-  pushScraperLog('info', 'gif', `Searching GIFs for "${query}"`);
-  try {
-    const url = `https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=LIVDSRZULELA&limit=10`;
-    const response = await axios.get(url, { timeout: 15000 });
-    const results = (response.data?.results || []).map(r => ({
-      url: r.media?.[0]?.gif?.url,
-      preview: r.media?.[0]?.tinygif?.url
-    })).filter(r => r.url);
-    pushScraperLog('info', 'gif', `Found ${results.length} GIFs for "${query}"`);
-    return { ok: true, data: { query, results, count: results.length } };
-  } catch (e) {
-    pushScraperLog('error', 'gif', `GIF search failed: ${e.message}`);
-    return { ok: false, error: e.message };
-  }
-}
-
-async function downloadAlbum(url) {
-  pushScraperLog('info', 'album', `Downloading album from ${url}`);
-  try {
-    const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 30000 });
-    const html = response.data;
-    const matches = html.match(/https:\/\/cdni\.pornpics\.com\/[^"']+/g) || [];
-    const images = matches.slice(0, 50).map(imgUrl => ({ url: imgUrl }));
-    pushScraperLog('info', 'album', `Found ${images.length} images in album`);
-    return { ok: true, data: { albumUrl: url, images, count: images.length } };
-  } catch (e) {
-    pushScraperLog('error', 'album', `Album download failed: ${e.message}`);
-    return { ok: false, error: e.message };
-  }
-}
-
-// ================================================================
 // EXPRESS APP
 // ================================================================
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now(), modelReady }));
+// Serve temp files
+app.use('/temp', express.static(temp.TEMP_DIR));
 
-app.get('/status', (req, res) => res.json({
-  ok: true,
-  service: 'intelligent-scraper',
-  version: '3.0.0',
-  uptime: process.uptime(),
-  model: { name: 'SmolLM2-135M', ready: modelReady, path: MODEL_PATH },
-  logs: scraperLogs.length,
-  tempFiles: registry.size
-}));
+// ── Health / Status ──
+app.get('/status', (req, res) => {
+  const stats = temp.getStats();
+  res.json({
+    status: 'ok',
+    service: 'intelligent-scraper',
+    version: '3.1.0',
+    uptime: process.uptime(),
+    model: { name: 'SmolLM2-135M', ready: modelReady },
+    tempFiles: stats.fileCount,
+    tempSizeMB: stats.totalSizeMB,
+    logs: scraperLogs.length
+  });
+});
 
+// ── Search images (original logic preserved) ──
 app.post('/search', async (req, res) => {
-  const { query, q, source } = req.body;
-  const searchQuery = query || q;
-  pushScraperLog('info', 'api', `POST /search — "${searchQuery}"`, { source: source || 'default', ip: req.ip });
-  const result = await searchImages(searchQuery, source);
-  res.json(result);
+  try {
+    const { query, site = 'pornpics' } = req.body;
+    if (!query) return res.status(400).json({ error: 'query required' });
+    pushScraperLog('info', 'api', `POST /search — "${query}"`, { site, ip: req.ip });
+    const urls = await album.searchImages(query, site);
+    pushScraperLog('info', 'search', `Found ${urls.length} images`);
+    res.json({ images: urls });
+  } catch (e) {
+    pushScraperLog('error', 'search', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ── Download album (original logic preserved) ──
 app.post('/album', async (req, res) => {
-  const { url } = req.body;
-  pushScraperLog('info', 'api', `POST /album — ${url}`, { ip: req.ip });
-  const result = await downloadAlbum(url);
-  res.json(result);
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'url required' });
+    pushScraperLog('info', 'api', `POST /album — ${url}`, { ip: req.ip });
+    const albumId = await album.downloadAlbum(url);
+    pushScraperLog('success', 'album', `Album created: ${albumId}`);
+    res.json({ albumId });
+  } catch (e) {
+    pushScraperLog('error', 'album', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ── Get next image (original logic preserved) ──
+app.get('/album/:albumId/next', (req, res) => {
+  try {
+    const { albumId } = req.params;
+    const image = temp.getNextImage(albumId);
+    if (!image) return res.status(404).json({ error: 'Album empty or not found' });
+    const imageUrl = `/temp/${path.basename(image.path)}`;
+    pushScraperLog('info', 'api', `GET /album/${albumId}/next — image ${image.index}/${image.total}`);
+    res.json({ imageId: image.id, url: imageUrl, index: image.index, total: image.total });
+  } catch (e) {
+    pushScraperLog('error', 'album', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Search GIF (original logic preserved) ──
 app.get('/gif', async (req, res) => {
-  const { q } = req.query;
-  pushScraperLog('info', 'api', `GET /gif — "${q}"`, { ip: req.ip });
-  const result = await searchGifs(q);
-  res.json(result);
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: 'q required' });
+    pushScraperLog('info', 'api', `GET /gif — "${q}"`, { ip: req.ip });
+    const gifUrls = await gif.search(q);
+    pushScraperLog('info', 'gif', `Found ${gifUrls.length} GIFs`);
+    res.json({ gifs: gifUrls });
+  } catch (e) {
+    pushScraperLog('error', 'gif', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ── Local LLM chat (for group replies) ──
 app.post('/chat', async (req, res) => {
-  const { prompt, system } = req.body;
-  if (!prompt) return res.status(400).json({ ok: false, error: 'prompt required' });
-  pushScraperLog('info', 'api', `POST /chat — "${prompt.slice(0, 60)}"`, { ip: req.ip });
-  const reply = await askLocalAI(prompt, system || 'You are a helpful assistant.');
-  if (!reply) return res.status(503).json({ ok: false, error: 'Model unavailable' });
-  res.json({ ok: true, reply });
+  try {
+    const { prompt, system } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'prompt required' });
+    pushScraperLog('info', 'api', `POST /chat — "${prompt.slice(0, 60)}"`, { ip: req.ip });
+    const reply = await askLocalAI(prompt, system || 'You are a helpful assistant.');
+    if (!reply) return res.status(503).json({ error: 'Model unavailable or busy' });
+    res.json({ reply });
+  } catch (e) {
+    pushScraperLog('error', 'ai', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
+// ── Cleanup ──
 app.post('/cleanup', (req, res) => {
+  temp.cleanup();
   pushScraperLog('info', 'api', 'POST /cleanup — manual trigger');
-  cleanup();
-  res.json({ ok: true, remaining: registry.size });
+  res.json({ status: 'cleaned' });
 });
 
-app.get('/logs', (req, res) => res.json({ logs: scraperLogs.slice(-200) }));
+// ── Logs API ──
+app.get('/logs', (req, res) => {
+  res.json({ logs: scraperLogs.slice(-200) });
+});
 
 // ================================================================
-// LOG DASHBOARD
+// DASHBOARD
 // ================================================================
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scraper API — Logs</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:monospace;background:#0a0e14;color:#c9d1d9;padding:20px}h1{font-size:18px;color:#58a6ff;margin-bottom:4px}.sub{font-size:12px;color:#8b949e;margin-bottom:16px}.card{background:#11161d;border:1px solid #21262d;border-radius:8px;padding:16px;margin-bottom:12px}.card h2{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}.stat-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #1c2128}.stat-row:last-child{border-bottom:none}.stat-val{color:#58a6ff;font-weight:600}#logs{height:500px;overflow-y:auto;font-size:12px;line-height:1.7;background:#0a0e14;border-radius:6px;padding:10px}.log-entry{padding:4px 0;border-bottom:1px solid #1c2128}.log-time{color:#484f58;margin-right:8px}.log-info{color:#58a6ff}.log-warn{color:#d29922}.log-error{color:#f85149}.log-source{color:#8b949e;margin-right:8px;font-weight:600}.log-meta{color:#484f58;font-size:11px;margin-left:6px}.green{color:#3fb950}.red{color:#f85149}</style></head><body>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:monospace;background:#0a0e14;color:#c9d1d9;padding:20px}h1{font-size:18px;color:#58a6ff;margin-bottom:4px}.sub{font-size:12px;color:#8b949e;margin-bottom:16px}.card{background:#11161d;border:1px solid #21262d;border-radius:8px;padding:16px;margin-bottom:12px}.card h2{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}.stat-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #1c2128}.stat-row:last-child{border-bottom:none}.stat-val{color:#58a6ff;font-weight:600}#logs{height:500px;overflow-y:auto;font-size:12px;line-height:1.7;background:#0a0e14;border-radius:6px;padding:10px}.log-entry{padding:4px 0;border-bottom:1px solid #1c2128}.log-time{color:#484f58;margin-right:8px}.log-info{color:#58a6ff}.log-warn{color:#d29922}.log-error{color:#f85149}.log-source{color:#8b949e;margin-right:8px;font-weight:600}.log-meta{color:#484f58;font-size:11px;margin-left:6px}</style></head><body>
 <h1>🔧 Intelligent Scraper — API Logs</h1>
-<div class="sub">Only requests from the main WhatsApp bot. No bot logic here.</div>
+<div class="sub">Requests from the main WhatsApp bot + local LLM activity.</div>
 <div class="card"><h2>Service Status</h2>
 <div class="stat-row"><span>Model</span><span class="stat-val" id="modelName">—</span></div>
 <div class="stat-row"><span>Model Ready</span><span class="stat-val" id="modelReady">—</span></div>
 <div class="stat-row"><span>Uptime</span><span class="stat-val" id="uptime">—</span></div>
 <div class="stat-row"><span>Temp Files</span><span class="stat-val" id="tempFiles">—</span></div>
 <div class="stat-row"><span>Log Entries</span><span class="stat-val" id="logCount">—</span></div></div>
-<div class="card"><h2>Request Log (from main bot)</h2><div id="logs"></div></div>
+<div class="card"><h2>Request Log</h2><div id="logs"></div></div>
 <script>
 const $=id=>document.getElementById(id);
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -254,6 +251,7 @@ refresh();refreshLogs();setInterval(refresh,5000);setInterval(refreshLogs,3000);
 // ================================================================
 app.listen(PORT, async () => {
   pushScraperLog('info', 'system', `Scraper API running on port ${PORT}`);
-  pushScraperLog('info', 'system', `Model: SmolLM2-135M (${MODEL_PATH})`);
+  pushScraperLog('info', 'system', `Model: SmolLM2-135M`);
+  setInterval(temp.cleanup, 300000);
   await initModel();
 });
