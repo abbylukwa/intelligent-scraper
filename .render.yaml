@@ -5,7 +5,5 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     envVars:
-      - key: MODEL_URL
-        value: https://huggingface.co/QuantLLM/SmolLM2-135M-GGUF/resolve/main/SmolLM2-135M-GGUF.Q4_K_M.gguf
       - key: NODE_VERSION
         value: 18.20.0
