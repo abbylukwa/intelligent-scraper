@@ -44,6 +44,16 @@ function saveAlbum(images) {
         } else if (item.buffer && item.ext) {
             buffer = item.buffer;
             ext = item.ext;
+        } else if (item.path && fs.existsSync(item.path)) {
+            // FIX: downloadAlbum() passes {path, filename, url, size} records from
+            // utils.downloadImage(). saveAlbum only handled Buffer/{buffer,ext}, so
+            // EVERY album ended up with 0 images and /album/:id/next always 404'd.
+            // Read the file from disk, then delete the orphaned temp file.
+            try {
+                buffer = fs.readFileSync(item.path);
+                ext = path.extname(item.path) || '.jpg';
+            } catch (e) { continue; }
+            try { fs.removeSync(item.path); } catch (e) {}
         } else {
             continue;
         }

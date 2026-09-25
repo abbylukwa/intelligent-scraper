@@ -50,7 +50,9 @@ async function downloadImage(url) {
                 'User-Agent': USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
                 'Referer': new URL(url).origin
             },
-            timeout:13200000
+            // FIX: was timeout: 13200000 (3.6 hours!) — downloads hung for hours
+            // before. 30s is enough for a single image.
+            timeout: 30000
         });
         
         const filename = crypto.createHash('md5').update(url).digest('hex') + '.jpg';

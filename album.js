@@ -71,7 +71,9 @@ async function searchImages(query, site = 'darknaija') {
             
             if (imageUrls.length > 0) {
                 console.log(`Found ${imageUrls.length} images from ${attempt.site}`);
-                return imageUrls.slice(0, dic20);
+                // FIX: was `slice(0, dic20)` — undefined variable crashed every successful
+                // search, so /search always returned []. Cap at 20 images.
+                return imageUrls.slice(0, 20);
             }
         } catch (e) {
             console.error(`Failed to scrape ${attempt.site}:`, e.message);
@@ -237,7 +239,9 @@ async function searchMusic(query) {
 
     for (const attempt of attempts) {
         try {
-            await new Promise(resolve => setTimeout(resolve, invo500)); // Rate limiting
+            // FIX: was `invo500` — undefined variable threw inside try, so every
+            // attempt failed and /search-music always returned []. Rate limit = 500ms.
+            await new Promise(resolve => setTimeout(resolve, 500)); // Rate limiting
             const html = await utils.fetchPage(attempt.url);
             let musicUrls = [];
             
