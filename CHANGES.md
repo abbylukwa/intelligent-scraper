@@ -1,3 +1,50 @@
+# intelligent-scraper
+
+## v2.4.0 — REAL IMAGE SEARCH (the logo problem is dead)
+
+### The problem (user evidence)
+"the scrapper is not doing a proper search like for example
+https://pngtree.com/free-animals-png/fish — i just added the link to the
+mylinks https://pngtree.com but its failing to search and download the
+actual image, its downloading the logo."
+
+Root causes found:
+1. `searchImages()` IGNORED its `site` argument and ran a fixed chain
+   (darknaija → pornpics → reddit r/boobs → imagefaqs) for EVERY query —
+   SFW queries were being answered by adult sites' leftovers, and the
+   first `<img>` on a blog page is usually the LOGO.
+2. `extractImageUrls` only rejected 'icon'/'logo' substrings — sprites,
+   avatars, banners, buttons, placeholders, extension-less trackers all
+   passed (the 5KB-in-97ms "download.png").
+3. `myLinkUrl` appended `?s=<query>` to bare domains — on pngtree that
+   renders the HOMEPAGE, and a pinned category URL got wrecked too.
+
+### The fix
+- NEW multi-engine search (album.js): Bing Images (HTML murl parse),
+  Flickr public feed (no key), Wikimedia Commons API, Wikipedia
+  pageimages, Openclipart — merged, deduped, relevance-ranked (query
+  word in URL first), junk-filtered, capped 25. Engines fail
+  independently; NSFW chain (pornpics/reddit) runs ONLY on nsfw=true.
+- NEW junk gate (utils.js): logo/sprite/avatar/icon/button/banner/ad/
+  placeholder/emoji/tracker patterns, svg/base64, extension-less
+  unknown hosts, tiny-size hints (w=32, -32x32) all rejected.
+- SMART my_links: pinned category pages fetched AS-IS; bare domains
+  boosted via Bing `query site:domain` so JS-rendered sites still
+  return their real images; {query} templates unchanged.
+- UA fallback chain (media.js): Wikimedia thumb server 403s browser
+  UAs — honest bot UA tried first, browser UA as fallback; 403/429/418
+  retries with the other UA.
+- my_links.json: pngtree slot shipped live as the example; dummy slots
+  disabled instead of enabled-by-default.
+
+### Test evidence (live, from this repo)
+- "peas" → 16-23 real images (Wikimedia + Bing + Flickr) in ~2s
+- "fish png" → 13 real fish PNGs; "chess board" → 25 (Bing 35 raw)
+- Downloads: NCI_peas_in_pod.jpg 62KB / Puntius fish PNG 665KB /
+  flickr 181KB — all real content, zero logos
+- Full HTTP round-trip on a live instance: /search → /download →
+  302KB image/jpeg in one call
+
 # Intelligent Scraper — CHANGE LOG
 
 ## v2.3.0 — MY LINKS: 7 dummy slots you replace with your own

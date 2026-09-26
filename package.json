@@ -1,7 +1,7 @@
 {
   "name": "intelligent-scraper",
-  "version": "2.3.0",
-  "description": "Parallel image album scraper with temp storage + music/video/download for BreadBot (ytdl-free online-resolver chain)",
+  "version": "2.4.0",
+  "description": "intelligent-scraper 2.4 \u2014 multi-engine image search (Bing/Flickr/Wikimedia/Wikipedia/Openclipart), junk filter, smart my_links, site: boosts",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

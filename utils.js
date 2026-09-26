@@ -3,8 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// User agents for rotation
+// User agents for rotation — v2.4: an honest bot UA FIRST, because some
+// CDNs (Wikimedia thumb server) 403 browser-style UAs; browser UAs follow
+// for the sites that want them. downloadImage retries naturally via the
+// album download loop.
 const USER_AGENTS = [
+    'BreadBotScraper/2.4 (media fetcher; contact: admin@breadbot.local)',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -13,7 +17,11 @@ const USER_AGENTS = [
 
 async function fetchPage(url) {
     try {
-        const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+        /* v2.4: Wikimedia hosts REQUIRE an honest bot UA (browser UAs get
+         * 403) — pick it deterministically there; random rotation elsewhere. */
+        let needsBotUa = false;
+        try { needsBotUa = /(^|\.)(wikimedia|wikipedia)\.org$/.test(new URL(url).hostname); } catch (e) {}
+        const userAgent = needsBotUa ? USER_AGENTS[0] : USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
         
         const response = await axios.get(url, {
             headers: {
@@ -79,10 +87,10 @@ async function downloadImage(url) {
 function extractImageUrls(html, baseUrl) {
     const $ = require('cheerio').load(html);
     const images = [];
-    
+
     $('img').each((i, elem) => {
-        let src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-original');
-        
+        let src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-original') || $(elem).attr('data-lazy-src');
+
         if (src) {
             // Convert relative URLs to absolute
             if (src.startsWith('//')) {
@@ -92,19 +100,49 @@ function extractImageUrls(html, baseUrl) {
             } else if (!src.startsWith('http')) {
                 src = baseUrl + '/' + src;
             }
-            
-            // Filter out data URLs and very small images
-            if (!src.startsWith('data:') && !src.includes('icon') && !src.includes('logo')) {
+
+            // v2.4: junk filter — the old one only checked 'icon'/'logo'
+            // substrings, so site banners, sprites, avatars, default
+            // placeholders and 1px trackers all passed and the bot ended
+            // up downloading a 5KB logo instead of the actual image.
+            if (!isJunkImageUrl(src)) {
                 images.push(src);
             }
         }
     });
-    
+
     return [...new Set(images)]; // Remove duplicates
+}
+
+/* ─── v2.4: real-image quality gate ─────────────────────────────
+ * Kills the "scraper downloads the logo" class of failures at the
+ * URL level: sprites, avatars, icons, buttons, banners, ads, place-
+ * holders, trackers, base64 blobs, svg chrome and extension-less
+ * mystery links are all rejected. Anything not matching a known
+ * image extension must come from a recognised image CDN to pass. */
+const JUNK_URL_RE = /(logo|sprite|sprite|favicon|avatar|button|btn[_-]|banner|ads?[-_/.]|pixel|tracker|spacer|blank|loading|placeholder|default\.(png|jpg|gif)|emoji|smiley|profile[_-]?pic|captcha|recaptcha|badge|flag[_-]|rating|stars?[_-]|social|share[-_]|\/ads\/|\/ad\/|doubleclick|googletagmanager|google-analytics|\/icons?\/|\/sprites?\/|_icon|_logo|-icon|-logo|icon\.|logo\.)/i;
+const IMG_EXT_RE  = /\.(png|jpe?g|webp|gif)(\?|#|$)/i;
+const KNOWN_IMG_CDN_RE = /(staticflickr\.com|wikimedia\.org|wikipedia\.org|unsplash\.com|pexels\.com|cdn\.pixabay\.com|images\.nicesnippets|bing\.net|thumb\.wikimedia|upload\.wikimedia|i\.imgur\.com|imgur\.com)/i;
+
+function isJunkImageUrl(u) {
+    if (!u || typeof u !== 'string') return true;
+    if (u.startsWith('data:')) return true;
+    if (/\.svg(\?|#|$)/i.test(u)) return true;               // chrome graphics
+    if (JUNK_URL_RE.test(u)) return true;
+    /* no image extension AND unknown host → not worth downloading */
+    if (!IMG_EXT_RE.test(u) && !KNOWN_IMG_CDN_RE.test(u)) return true;
+    /* tiny-size query hints (w=32, 16x16, 50px…) */
+    if (/[?&](w|width|size)=(1[0-9]?|[2-9][0-9]|[12][0-9]{2})\b/i.test(u) && !/[?&](w|width)=(6|7|8|9)[0-9]{2,}/i.test(u)) {
+        const m = /[?&](w|width|size)=(\d+)/i.exec(u);
+        if (m && parseInt(m[2], 10) < 260) return true;
+    }
+    if (/-([0-9]{1,2})x([0-9]{1,2})\.(png|jpe?g|webp)/i.test(u)) return true;  // -32x32 sprite thumbs
+    return false;
 }
 
 module.exports = {
     fetchPage,
     downloadImage,
-    extractImageUrls
+    extractImageUrls,
+    isJunkImageUrl
 };

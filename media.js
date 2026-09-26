@@ -257,16 +257,35 @@ async function ytDownload(idOrUrl, kind, baseUrl) {
     return { mediaUrl: baseUrl + '/temp/' + id + ext, title: resolved.title, mimetype, kind, sizeBytes: buf.length };
 }
 
-/* ── Generic direct-URL download (mp3 sites, image CDNs, etc.) ── */
+/* ── Generic direct-URL download (mp3 sites, image CDNs, etc.) ──
+ * v2.4: UA fallback chain — some CDNs (Wikimedia thumb server) 403
+ * browser-style UAs and REQUIRE an honest bot UA, while most other
+ * sites are the opposite. Try one, on 403/429 retry with the other. */
+const FETCH_UAS = [
+    'BreadBotScraper/2.4 (media fetcher; contact: admin@breadbot.local)',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+];
+async function fetchWithUaFallback(url, opts) {
+    let lastErr = null;
+    for (const ua of FETCH_UAS){
+        try {
+            return await axios.get(url, Object.assign({}, opts, { headers: Object.assign({}, (opts && opts.headers) || {}, { 'User-Agent': ua }) }));
+        } catch (e) {
+            lastErr = e;
+            const st = e.response && e.response.status;
+            if (st !== 403 && st !== 429 && st !== 418) throw e;   /* non-UA problem — do not retry */
+        }
+    }
+    throw lastErr;
+}
 async function genericDownload(url, kind, baseUrl) {
     const cap = MAX_MB * 1024 * 1024;
-    const r = await axios.get(url, {
+    const r = await fetchWithUaFallback(url, {
         responseType: 'arraybuffer',
         timeout: 120000,
         maxContentLength: cap + 1,
         maxBodyLength: cap + 1,
-        validateStatus: s => s >= 200 && s < 400,
-        headers: { 'User-Agent': UA }
+        validateStatus: s => s >= 200 && s < 400
     });
     const buf = Buffer.from(r.data);
     if (!buf.length) throw new Error('Empty file');

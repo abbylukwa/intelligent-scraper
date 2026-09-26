@@ -4,6 +4,159 @@ const pLimit = require('p-limit');
 
 const ALBUM_MAP = {};
 
+/* ══════════════════════════════════════════════════════════════
+ *  v2.4 REAL IMAGE ENGINES — why "fish" returned a logo before
+ *  The old searchImages() ignored the `site` argument and always
+ *  hammered a fixed chain (darknaija blog → pornpics → reddit),
+ *  grabbing whatever <img> tags sat on the page — usually the site
+ *  LOGO. Now a real engine chain runs for every query, merged and
+ *  junk-filtered:
+ *    1. my_links boosts  (Bing "query site:your-domain" — finds the
+ *       actual content images on YOUR sites even if they are
+ *       JS-rendered, e.g. pngtree category pages)
+ *    2. Bing Images      (general, any query — HTML murl parse)
+ *    3. Flickr feed      (general photos, no API key)
+ *    4. Wikimedia Commons(factual objects — real content images)
+ *    5. Wikipedia pages  (topic lead images)
+ *    6. Openclipart      (clipart/PNG, short timeout)
+ *  NSFW queries keep the legacy chain (pornpics/reddit) — only ever
+ *  used when the bot explicitly asks for nsfw.
+ *  Every engine fails independently: one dead engine never breaks
+ *  the search. Results are relevance-ranked (query word in URL
+ *  first), deduped, junk-filtered and capped at 25. ═════════════ */
+const ENGINE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const axios = require('axios');
+
+async function bingImages(q, siteDomain){
+    const query = siteDomain ? `${q} site:${siteDomain}` : q;
+    const url = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&form=HDRSC2&first=1`;
+    const r = await axios.get(url, { headers: {
+        'User-Agent': ENGINE_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': 'SRCHHPGUSR=SRCHLANG=en'
+    }, timeout: 15000 });
+    const $ = require('cheerio').load(r.data);
+    const out = [];
+    $('a.iusc').each((i, el) => {
+        try { const m = JSON.parse($(el).attr('m')); if (m && m.murl && !utils.isJunkImageUrl(m.murl)) out.push(m.murl); } catch (e) {}
+    });
+    return out;
+}
+
+async function flickrImages(q){
+    const r = await axios.get('https://www.flickr.com/services/feeds/photos_public.gne', {
+        params: { tags: q, format: 'json', tagmode: 'any', nojsoncallback: 1 },
+        headers: { 'User-Agent': ENGINE_UA }, timeout: 15000 });
+    const items = r.data && r.data.items || [];
+    return items.map(x => x.media && x.media.m).filter(Boolean)
+        .map(u => u.replace(/_m\.jpg$/, '_b.jpg'));   /* 500px → 1024px large when available */
+}
+
+async function commonsImages(q){
+    const r = await axios.get('https://commons.wikimedia.org/w/api.php', {
+        params: { action:'query', format:'json', generator:'search',
+                  gsrsearch:`filetype:bitmap ${q}`, gsrlimit:15, gsrnamespace:6,
+                  prop:'imageinfo', iiprop:'url|size', iiurlwidth:1024 },
+        headers: { 'User-Agent': 'BreadBotScraper/2.4 (image search; contact: admin@breadbot.local)' },
+        timeout: 15000 });
+    const pages = r.data?.query?.pages || {};
+    return Object.values(pages).map(p => p.imageinfo?.[0]?.thumburl).filter(Boolean);
+}
+
+async function wikipediaImages(q){
+    const r = await axios.get('https://en.wikipedia.org/w/api.php', {
+        params: { action:'query', format:'json', generator:'search', gsrsearch:q,
+                  gsrlimit:8, gsrnamespace:0, prop:'pageimages',
+                  piprop:'thumbnail', pithumbsize:1000 },
+        headers: { 'User-Agent': 'BreadBotScraper/2.4 (image search; contact: admin@breadbot.local)' },
+        timeout: 15000 });
+    const pages = r.data?.query?.pages || {};
+    return Object.values(pages).map(p => p.thumbnail && p.thumbnail.source).filter(Boolean);
+}
+
+async function openclipartImages(q){
+    const r = await axios.get('https://openclipart.org/search/?query=' + encodeURIComponent(q),
+        { headers: { 'User-Agent': ENGINE_UA }, timeout: 12000 });
+    const urls = String(r.data).match(/https?:\/\/[^"'\s<>]+\/download\/[^"'\s<>]+/g) || [];
+    return urls;
+}
+
+function relevantFirst(urls, q){
+    const words = String(q).toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const score = u => {
+        const s = String(u).toLowerCase();
+        return words.some(w => s.includes(w)) ? 0 : 1;
+    };
+    return [...urls].sort((a, b) => score(a) - score(b));
+}
+
+async function runEngines(list){
+    const found = [];
+    await Promise.all(list.map(async (fn) => {
+        try {
+            const urls = await fn();
+            const clean = (urls || []).filter(u => !utils.isJunkImageUrl(u));
+            if (clean.length) found.push(...clean);
+        } catch (e) {
+            console.error('[engine] failed:', e.message);
+        }
+    }));
+    return found;
+}
+
+async function searchImages(query, site = 'auto', opts = {}) {
+    const q = String(query || '').trim();
+    if (!q) return [];
+    const nsfw = !!(opts && opts.nsfw);
+    const boostDomains = (opts && opts.boostDomains) || [];
+
+    /* ── explicit legacy site (bot sends 'darknaija' etc.) ── */
+    const LEGACY = {
+        darknaija:    { url: `https://darknaija.com/?s=${encodeURIComponent(q)}`, extractor: extractDarkNaijaImages },
+        imagefaqs:    { url: `https://www.imagefaqs.com/search?q=${encodeURIComponent(q)}`, extractor: extractImageFaqsImages },
+        pornpics:     { url: `https://www.pornpics.com/search/?q=${encodeURIComponent(q)}`, extractor: extractPornPicsImages },
+        pornpics_alt: { url: `https://www.pornpics.com/search/srch.php?q=${encodeURIComponent(q)}&lang=en`, extractor: extractPornPicsImages },
+        reddit:       { url: `https://old.reddit.com/r/boobs/top/.json?limit=20`, extractor: extractRedditImages }
+    };
+
+    const engines = [];
+    /* 1 — the user's own domains first, via Bing site: operator */
+    for (const d of boostDomains.slice(0, 3)) engines.push(() => bingImages(q, d));
+    /* 2 — general engines */
+    if (site === 'auto' || site === 'bing')     engines.push(() => bingImages(q));
+    if (site === 'auto' || site === 'flickr')   engines.push(() => flickrImages(q));
+    if (site === 'auto' || site === 'commons')  engines.push(() => commonsImages(q));
+    if (site === 'auto' || site === 'wikipedia')engines.push(() => wikipediaImages(q));
+    if (site === 'auto' || site === 'openclipart') engines.push(() => openclipartImages(q));
+    /* 3 — NSFW chain only when explicitly asked */
+    if (nsfw){
+        engines.push(async () => {
+            const html = await utils.fetchPage(LEGACY.pornpics.url);
+            return extractPornPicsImages(html, LEGACY.pornpics.url);
+        });
+        engines.push(async () => {
+            const html = await utils.fetchPage(LEGACY.reddit.url);
+            return extractRedditImages(html, LEGACY.reddit.url);
+        });
+    }
+    /* 4 — legacy SFW blog sites as last-ditch attempts */
+    if (site === 'auto' || site === 'darknaija' || site === 'imagefaqs'){
+        for (const key of ['darknaija', 'imagefaqs']){
+            if (site !== 'auto' && site !== key) continue;
+            engines.push(async () => {
+                const html = await utils.fetchPage(LEGACY[key].url);
+                return LEGACY[key].extractor(html, LEGACY[key].url);
+            });
+        }
+    }
+
+    let urls = await runEngines(engines);
+    urls = relevantFirst([...new Set(urls)], q).slice(0, 25);
+    if (urls.length) console.log(`[search] "${q}" (site=${site}${nsfw ? ' nsfw' : ''}) → ${urls.length} images`);
+    return urls;
+}
+
 async function downloadAlbum(albumUrlOrKeyword, concurrency = 3) {
     let albumUrl = albumUrlOrKeyword;
     if (albumUrlOrKeyword in ALBUM_MAP) {
@@ -29,61 +182,10 @@ async function downloadAlbum(albumUrlOrKeyword, concurrency = 3) {
     return albumId;
 }
 
-async function searchImages(query, site = 'darknaija') {
-    const attempts = [
-        { 
-            site: 'darknaija', 
-            url: `https://darknaija.com/?s=${encodeURIComponent(query)}`,
-            extractor: extractDarkNaijaImages
-        },
-        { 
-            site: 'pornpics', 
-            url: `https://www.pornpics.com/search/?q=${encodeURIComponent(query)}`,
-            extractor: extractPornPicsImages
-        },
-        { 
-            site: 'pornpics_alt', 
-            url: `https://www.pornpics.com/search/srch.php?q=${encodeURIComponent(query)}&lang=en`,
-            extractor: extractPornPicsImages
-        },
-        { 
-            site: 'reddit', 
-            url: `https://old.reddit.com/r/boobs/top/.json?limit=20`,
-            extractor: extractRedditImages
-        },
-        { 
-            site: 'imagefaqs', 
-            url: `https://www.imagefaqs.com/search?q=${encodeURIComponent(query)}`,
-            extractor: extractImageFaqsImages
-        }
-    ];
-
-    for (const attempt of attempts) {
-        try {
-            const html = await utils.fetchPage(attempt.url);
-            let imageUrls = [];
-            
-            if (attempt.extractor) {
-                imageUrls = await attempt.extractor(html, attempt.url);
-            } else {
-                imageUrls = await utils.extractImageUrls(html, attempt.url);
-            }
-            
-            if (imageUrls.length > 0) {
-                console.log(`Found ${imageUrls.length} images from ${attempt.site}`);
-                // FIX: was `slice(0, dic20)` — undefined variable crashed every successful
-                // search, so /search always returned []. Cap at 20 images.
-                return imageUrls.slice(0, 20);
-            }
-        } catch (e) {
-            console.error(`Failed to scrape ${attempt.site}:`, e.message);
-            continue;
-        }
-    }
-    return [];
-}
-
-// Site-specific extractors
+/* ─── v2.4: legacy per-site extractors kept for the explicit-site
+ * paths and the NSFW chain (darknaija / pornpics / reddit / imagefaqs).
+ * The old fixed-order searchImages() that ran these for EVERY query
+ * (and served the site logo as the first result) is gone. ─── */
 async function extractDarkNaijaImages(html, url) {
     const $ = require('cheerio').load(html);
     const images = [];

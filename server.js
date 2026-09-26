@@ -36,12 +36,37 @@ try {
 }
 
 // Build the real URL to fetch for a custom link + search word.
-// {query} in the url is replaced; without it we append ?s=<query> (or &s=).
+// v2.4 FIX — why pngtree.com downloaded the logo:
+//   • a link WITH a path (https://pngtree.com/free-animals-png/fish) is a
+//     pinned CATEGORY page → fetched AS-IS (its own path already says
+//     what to grab — appending ?s= turned it back into the homepage)
+//   • a bare domain (https://pngtree.com) is useless with ?s= on modern
+//     JS sites → the domain is ALSO searched via Bing "query site:domain"
+//     in /search (boostDomains), which finds the site's real images
+//   • {query} templates work exactly as before
 function myLinkUrl(link, query) {
     const q = encodeURIComponent(query || '');
     const u = String(link.url || '');
     if (u.includes('{query}')) return u.replace(/\{query\}/g, q);
+    try {
+        const pu = new URL(u);
+        const segs = pu.pathname.split('/').filter(Boolean);
+        /* pinned category page: keep it as-is (search word already in path) */
+        if (segs.length >= 1 && !/[?&]s=$/.test(u)) return u;
+    } catch (e) {}
     return u + (u.includes('?') ? '&' : '?') + 's=' + q;
+}
+
+/* v2.4: unique hostnames from your enabled image links — used to boost
+ * searches with Bing site: so your sites return REAL content images. */
+function myLinkDomains(type){
+    const out = new Set();
+    for (const l of MY_LINKS){
+        if (l.enabled === false) continue;
+        if (String(l.type || 'image') !== type) continue;
+        try { out.add(new URL(l.url).hostname.replace(/^www\./, '')); } catch (e) {}
+    }
+    return [...out];
 }
 
 // Try every enabled custom link of `type`; returns an array of direct
@@ -94,7 +119,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.3.0',
+        version: '2.4.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -155,10 +180,11 @@ dataApi.use((req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized — send Authorization: Bearer <SCRAPER_TOKEN>' });
 });
 
-// Search images (5 sources)
+// Search images — v2.4 multi-engine (Bing / Flickr / Wikimedia / Wikipedia /
+// Openclipart + your my_links domains boosted via site: operator)
 app.post('/search', dataApi, async (req, res) => {
     try {
-        const { query, q, site = 'darknaija' } = req.body;
+        const { query, q, site = 'auto', nsfw = false } = req.body;
         const searchQuery = query || q;
         
         if (!searchQuery || searchQuery.trim() === '') {
@@ -168,8 +194,8 @@ app.post('/search', dataApi, async (req, res) => {
             });
         }
         
-        console.log(`Searching images for: "${searchQuery}"`);
-        const urls = await album.searchImages(searchQuery, site);
+        console.log(`Searching images for: "${searchQuery}" (site=${site}, nsfw=${!!nsfw})`);
+        const urls = await album.searchImages(searchQuery, site, { nsfw: nsfw === true, boostDomains: myLinkDomains('image') });
 
         // MY LINKS: merge results from your own sites (my_links.json)
         const myUrls = await tryMyLinks(searchQuery, 'image');
