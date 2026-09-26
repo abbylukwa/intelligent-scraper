@@ -1,21 +1,18 @@
 {
-  "_README": "=== THE 7 LINKS BELOW ARE DUMMY PLACEHOLDERS - REPLACE THEM WITH YOUR OWN ===",
+  "_README": "=== UPDATED: Realistic porn sources for images, gifs, and videos ===",
   "_HOW_TO": [
-    "1. Replace each dummy 'url' with your own website link.",
-    "2. Keep {query} where the search word should go. Example: https://mysite.com/?s={query}  (if you leave {query} out, the scraper adds ?s=<searchword> for you).",
-    "3. 'type': 'image' for picture sites, 'gif' for GIF sites.",
-    "4. 'enabled': true to use a slot, false to switch it off without deleting it.",
-    "5. Save, restart the scraper, then open /my-links in the browser to check.",
-    "A dead slot never breaks a search - it is skipped and logged.",
-    "The built-in sites (darknaija, pornpics, reddit, imagefaqs, tenor, giphy ...) were NOT touched - your links are tried AFTER them."
+    "1. {query} is replaced by your search term (e.g., 'milf', 'petite', 'anal').",
+    "2. 'type': 'image' for stills/galleries, 'gif' for looping animations.",
+    "3. 'enabled': true means the scraper hits this site.",
+    "4. These sites are tried AFTER the built-in ones (darknaija, etc.)."
   ],
   "links": [
-    { "slot": 1, "name": "MY-SITE-1 (replace me)", "url": "https://www.replace-me-1.com/search?q={query}", "type": "image", "enabled": true },
-    { "slot": 2, "name": "MY-SITE-2 (replace me)", "url": "https://www.replace-me-2.com/?s={query}", "type": "image", "enabled": true },
-    { "slot": 3, "name": "MY-SITE-3 (replace me)", "url": "https://www.replace-me-3.com/gallery/{query}", "type": "image", "enabled": true },
-    { "slot": 4, "name": "MY-SITE-4 (replace me)", "url": "https://www.replace-me-4.com/search/{query}", "type": "image", "enabled": true },
-    { "slot": 5, "name": "MY-SITE-5 (replace me)", "url": "https://www.replace-me-5.com/?search={query}", "type": "image", "enabled": true },
-    { "slot": 6, "name": "MY-GIF-SITE-6 (replace me)", "url": "https://www.replace-me-6.com/gifs?q={query}", "type": "gif", "enabled": true },
-    { "slot": 7, "name": "MY-GIF-SITE-7 (replace me)", "url": "https://www.replace-me-7.com/search/{query}/gifs", "type": "gif", "enabled": true }
+    { "slot": 1, "name": "Reddit NSFW", "url": "https://www.reddit.com/search.php?q={query}+nsfw", "type": "image", "enabled": true },
+    { "slot": 2, "name": "ImageFAQs", "url": "https://www.imagefaq.com/search?q={query}", "type": "image", "enabled": true },
+    { "slot": 3, "name": "E-Hentai / Realistic", "url": "https://exhentai.org/g/search?q={query}", "type": "image", "enabled": true },
+    { "slot": 4, "name": "Pornpics deez", "url": "https://www.pornpics.com/search/{query}", "type": "image", "enabled": true },
+    { "slot": 5, "name": "BDSMC / Gallery", "url": "https://www.bdsmc.com/search?q={query}", "type": "image", "enabled": true },
+    { "slot": 6, "name": "Tenor Porn GIFs", "url": "https://tenor.com/search/{query}-porn-gifs", "type": agif",  "enabled": true },
+    { "slot": 7, "name": "Giphy Adult",  "url": "https://giphy.com/search/{query}+porn",  "type": agif",  "enabled": true }
   ]
 }
