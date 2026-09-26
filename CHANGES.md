@@ -1,6 +1,22 @@
-# Intelligent Scraper v2.2.0 — CHANGE LOG
+# Intelligent Scraper — CHANGE LOG
 
-Rules followed: existing code was MODIFIED, not rewritten. Endpoints that
+## v2.3.0 — MY LINKS: 7 dummy slots you replace with your own
+
+| File | Change |
+|------|--------|
+| my_links.json | NEW — 7 clearly-labelled dummy slots (`https://www.replace-me-1.com/...`) + a _HOW_TO block. Replace the URLs with your own sites; keep `{query}` where the search word goes; set type `image` or `gif`; `enabled` true/false. |
+| server.js | MY LINKS loader at boot (bad/missing file never crashes the scraper), `tryMyLinks()` merge into POST /search (images) and GET /gif (gifs), GET /my-links endpoint to inspect your slots, /status now reports `myLinks: {loaded, enabled}` and version 2.3.0. |
+| album.js / gif.js / media.js | NOT TOUCHED — byte-identical to v2.2.1 (all built-in direct links, incl. NSFW, verified by sha256). |
+
+### Guarantees
+
+- A dead/dummy slot NEVER breaks a search: each slot fails independently
+  (15s cap), is skipped and logged with "replace it in my_links.json".
+- Your links are tried AFTER the built-in sites and merged + de-duplicated.
+- The response now includes `myLinks: N` so you can see how many results
+  came from your own sites.
+
+
 worked (/search, /gif, /album, /cleanup) kept their contracts.
 
 ## FILES CHANGED

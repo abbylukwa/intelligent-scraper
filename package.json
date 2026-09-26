@@ -1,6 +1,6 @@
 {
   "name": "intelligent-scraper",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "Parallel image album scraper with temp storage + music/video/download for BreadBot (ytdl-free online-resolver chain)",
   "main": "server.js",
   "scripts": {

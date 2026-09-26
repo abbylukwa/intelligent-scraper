@@ -12,6 +12,70 @@ const media = require('./media');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// ═══════════════════════════════════════════════════════════════
+// MY LINKS — 7 easy-to-replace slots (edit my_links.json)
+// Put YOUR own website links in my_links.json — the 7 dummy ones in
+// there are placeholders. Nothing else in this file needs to change.
+// Built-in sites (darknaija, pornpics, reddit, imagefaqs, tenor,
+// giphy ...) were NOT touched.
+// ═══════════════════════════════════════════════════════════════
+const fs = require('fs');
+const utils = require('./utils');
+const MY_LINKS_FILE = path.join(__dirname, 'my_links.json');
+let MY_LINKS = [];
+try {
+    if (fs.existsSync(MY_LINKS_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(MY_LINKS_FILE, 'utf8'));
+        MY_LINKS = Array.isArray(raw.links) ? raw.links.filter(l => l && l.url) : [];
+        console.log(`MY LINKS: loaded ${MY_LINKS.length} slot(s) from my_links.json`);
+    } else {
+        console.log('MY LINKS: my_links.json not found — running on built-in sites only');
+    }
+} catch (e) {
+    console.error('MY LINKS: could not parse my_links.json —', e.message);
+}
+
+// Build the real URL to fetch for a custom link + search word.
+// {query} in the url is replaced; without it we append ?s=<query> (or &s=).
+function myLinkUrl(link, query) {
+    const q = encodeURIComponent(query || '');
+    const u = String(link.url || '');
+    if (u.includes('{query}')) return u.replace(/\{query\}/g, q);
+    return u + (u.includes('?') ? '&' : '?') + 's=' + q;
+}
+
+// Try every enabled custom link of `type`; returns an array of direct
+// media URLs found. A dead/dummy link NEVER breaks a search — each slot
+// fails independently, is skipped and logged.
+async function tryMyLinks(query, type) {
+    const slots = MY_LINKS.filter(l => (l.enabled !== false) && String(l.type || 'image') === type);
+    if (!slots.length) return [];
+    const found = [];
+    await Promise.all(slots.map(async (link) => {
+        try {
+            const url = myLinkUrl(link, query);
+            const html = await Promise.race([
+                utils.fetchPage(url),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+            ]);
+            let urls = [];
+            if (type === 'gif') {
+                const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.gif/gi) || [];
+                urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
+            } else {
+                urls = await utils.extractImageUrls(String(html), url);
+            }
+            urls = [...new Set(urls)].slice(0, 30);
+            if (urls.length) console.log(`MY LINKS: "${link.name || link.url}" → ${urls.length} ${type}(s)`);
+            else console.log(`MY LINKS: "${link.name || link.url}" → no ${type}s found (dummy link? replace it in my_links.json)`);
+            found.push(...urls);
+        } catch (e) {
+            console.log(`MY LINKS: "${link.name || link.url}" skipped (${e.message}) — replace it in my_links.json`);
+        }
+    }));
+    return found;
+}
+
 // FIX: trust proxy so req.protocol is https behind Render's proxy
 // (media URLs returned to the bot must be absolute https links)
 app.set('trust proxy', true);
@@ -30,7 +94,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.1.0',
+        version: '2.3.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -47,8 +111,25 @@ app.get('/status', (req, res) => {
             '/music',
             '/video',
             '/download',
-            '/cleanup'
-        ]
+            '/cleanup',
+            '/my-links'
+        ],
+        myLinks: {
+            loaded: MY_LINKS.length,
+            enabled: MY_LINKS.filter(l => l.enabled !== false).length
+        }
+    });
+});
+
+// MY LINKS status — see your 7 slots and whether they are loaded
+app.get('/my-links', (req, res) => {
+    res.json({
+        success: true,
+        file: 'my_links.json',
+        howTo: 'Edit my_links.json → put your own URL in "url", keep {query} where the search word goes, set type "image" or "gif", enabled true/false. Restart the service. Built-in sites were not touched.',
+        loaded: MY_LINKS.length,
+        enabled: MY_LINKS.filter(l => l.enabled !== false).length,
+        links: MY_LINKS
     });
 });
 
@@ -89,13 +170,18 @@ app.post('/search', dataApi, async (req, res) => {
         
         console.log(`Searching images for: "${searchQuery}"`);
         const urls = await album.searchImages(searchQuery, site);
+
+        // MY LINKS: merge results from your own sites (my_links.json)
+        const myUrls = await tryMyLinks(searchQuery, 'image');
+        const allUrls = [...new Set([...urls, ...myUrls])];
         
         res.json({ 
             success: true,
             query: searchQuery,
-            images: urls, 
-            count: urls.length,
-            source: site
+            images: allUrls, 
+            count: allUrls.length,
+            source: site,
+            myLinks: myUrls.length
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -281,12 +367,17 @@ app.get('/gif', dataApi, async (req, res) => {
         
         console.log(`Searching GIFs for: "${q}"`);
         const gifUrls = await gif.search(q);
+
+        // MY LINKS: merge GIFs from your own sites (my_links.json)
+        const myGifs = await tryMyLinks(q, 'gif');
+        const allGifs = [...new Set([...gifUrls, ...myGifs])];
         
         res.json({ 
             success: true,
             query: q,
-            gifs: gifUrls, 
-            count: gifUrls.length
+            gifs: allGifs, 
+            count: allGifs.length,
+            myLinks: myGifs.length
         });
     } catch (e) {
         console.error('GIF search error:', e);
