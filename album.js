@@ -85,17 +85,22 @@ async function xbooruImages(q){
 }
 
 async function realbooruImages(q){
-    const tags = String(q).trim().replace(/\s+/g, '_');
-    const url = `https://realbooru.com/index.php?page=post&s=list&tags=${encodeURIComponent(tags)}`;
-    const r = await axios.get(url, { headers: {
-        'User-Agent': ENGINE_UA, 'Referer': 'https://realbooru.com/'
-    }, timeout: 15000 });
-    const thumbs = String(r.data).match(/https?:\/\/realbooru\.com\/thumbnails\/[0-9a-f]{2}\/[0-9a-f]{2}\/thumbnail_[0-9a-f]+\.(?:jpg|png|gif|jpeg)/gi) || [];
+    /* v2.7 FIX: tags join with '+' (underscore made it ONE unknown tag →
+     * 1 result) and the request must carry FULL browser headers — with
+     * only UA+Referer realbooru serves a stripped page with no thumbs.
+     * Verified: full-header fetch of tags=ebony+ass → 41 thumbs, 3/3 runs. */
+    const tags = String(q).trim().replace(/\s+/g, '+');
+    const url = `https://realbooru.com/index.php?page=post&s=list&tags=${encodeURIComponent(tags).replace(/%2B/g, '+')}`;
+    const r = await utils.fetchPage(url);
+    const thumbs = String(r).match(/https?:\/\/realbooru\.com\/thumbnails\/[0-9a-f]{2}\/[0-9a-f]{2}\/thumbnail_[0-9a-f]+\.(?:jpg|png|gif|jpeg)/gi) || [];
     const out = [];
     for (const t of thumbs){
-        /* /thumbnails/XX/YY/thumbnail_HASH.ext → /images/XX/YY/HASH.ext */
-        const full = t.replace('/thumbnails/', '/images/').replace('thumbnail_', '');
-        if (!utils.isJunkImageUrl(full)) out.push(full);
+        /* v2.7: shared converter — /thumbnails/XX/YY/thumbnail_HASH.ext
+         * → /images/XX/YY/HASH.ext (download needs Referer: realbooru.com,
+         * media.js same-origin fallback sends it). */
+        for (const full of utils.booruFullUrls(t)){
+            if (!utils.isJunkImageUrl(full)) out.push(full);
+        }
         if (out.length >= 30) break;
     }
     return out;
@@ -183,8 +188,20 @@ async function runEngines(list, diag){
             console.error('[engine] ' + (e.n || '?') + ' failed:', err.message);
         }
     }));
+    /* v2.7 ROUND-ROBIN MERGE: plain bucket concat let xbooru (40 hits)
+     * fill the whole 40-cap so realbooru never surfaced. Interleave one
+     * result per engine per round (engine order = priority order) so
+     * your slots lead AND the boorus MIX in the head of the list. */
     const found = [];
-    for (const b of buckets){ if (b && b.length) found.push(...b); }
+    const idx = new Array(list.length).fill(0);
+    let added = true;
+    while (found.length < 500 && added) {
+        added = false;
+        for (let i = 0; i < list.length; i++) {
+            const b = buckets[i];
+            if (b && idx[i] < b.length) { found.push(b[idx[i]++]); added = true; }
+        }
+    }
     return found;
 }
 

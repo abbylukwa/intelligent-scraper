@@ -142,7 +142,7 @@ async function tryMyLinks(query, type, extraLinks) {
              * makes the NSFW subreddits answer. */
             if (/\.json(\?|#|$)/i.test(url)) {
                 const r = await axios.get(url, {
-                    headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/2.6', 'Accept': 'application/json' },
+                    headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/2.7', 'Accept': 'application/json' },
                     timeout: 15000 });
                 const children = r.data?.data?.children || [];
                 const urls = [];
@@ -169,6 +169,19 @@ async function tryMyLinks(query, type, extraLinks) {
                 urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
             } else {
                 urls = await utils.extractImageUrls(String(html), url);
+                /* v2.7 DAPI XML SLOTS: gelbooru-family dapi endpoints answer
+                 * static XML with full-res originals in file_url="…" — no
+                 * <img> tags, cheerio finds nothing. VERIFIED: xbooru dapi
+                 * "ebony ass" → 20 attrs → direct img.xbooru.com downloads. */
+                if (!urls.length) urls = utils.extractDapiFileUrls(String(html));
+                /* v2.7 BOORU CONVERTER: browse pages only expose small
+                 * /thumbnails/ links — rewrite them to the full originals.
+                 * VERIFIED live: realbooru 148KB, rule34.xxx 194KB. When a
+                 * conversion exists the thumbs are DROPPED (they are 3-6KB
+                 * junk-gate bait). */
+                const fulls = [];
+                for (const u of urls) fulls.push(...utils.booruFullUrls(u));
+                if (fulls.length) urls = fulls;
             }
             urls = [...new Set(urls)].slice(0, 30);
             diagRecord(String(link.url), urls.length, urls.length ? null : '0 media in static HTML (JS-walled? the Bing site: boost still covers this domain)');
@@ -201,7 +214,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.6.0',
+        version: '2.7.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -237,7 +250,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.6.0',
+        version: '2.7.0',
         howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -305,7 +318,7 @@ app.post('/search', dataApi, async (req, res) => {
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             engines: engineDiag,      /* v2.6: {xbooru: n, realbooru: n, bing: n, …} */
-            version: '2.6.0'
+            version: '2.7.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -509,7 +522,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             engines: gifDiag,         /* v2.6: {tenor: n, giphy: n, reddit: n} */
-            version: '2.6.0'
+            version: '2.7.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);

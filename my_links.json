@@ -1,55 +1,51 @@
 {
-  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.6 (HOT-RELOADED) — SYNCED WITH LIVE DEPLOY 2026-09-27 ===",
+  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.7 (HOT-RELOADED) — EVERY SLOT LIVE-VERIFIED 2026-09-27: dead links replaced (reddit 403, pornpics WAF, babehub 403, pichunter 403) with booru sites that answer datacenter IPs and ship FULL-RES originals ===",
   "_HOW_TO": [
-    "PUT any website link in a slot's 'url'. Three kinds work:",
+    "PUT any website link in a slot's 'url'. Four kinds work:",
     "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
-    "  2. Category page: https://www.cleanpng.com/free/christmas.html -> fetched AS-IS (do not add ?s= yourself).",
+    "  2. Category page: https://www.cleanpng.com/free/christmas.html -> fetched AS-IS.",
     "  3. Template:     https://mysite.com/search?q={query} -> {query} is replaced by the search word.",
+    "  4. v2.7 DAPI XML: https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query} -> file_url full-res extracted.",
+    "v2.7 BOORU CONVERTER: realbooru + rule34.xxx thumbnails are auto-rewritten to FULL-RES originals (verified 148KB/194KB downloads).",
     "'type': 'image' or 'gif'. 'enabled': false switches a slot off without deleting it.",
     "v2.5 HOT-RELOAD: edit this file and the NEXT search already uses it — NO restart needed.",
     "v2.5 YOUR LINKS ARE TRIED FIRST and their results LEAD the list (the bot downloads images[0]).",
-    "v2.5 no-file option: set MYLINKS env var on this service or on the bot (comma-separated URLs).",
     "CHECK /my-links in a browser — per-slot diagnostics: lastResult {count, error, ts}.",
-    "v2.6 JSON SLOTS: any slot url ending in .json is parsed as JSON (reddit search API works: old.reddit.com/search.json?q={query}&include_over_18=on).",
-    "v2.6 hotlink fix: pngtree/cloudfront downloads now send Referer automatically; the bot also retries the next result.",
-    "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics.",
-    "v2.5.2 THREE ENGINES: images = your slots + Bing boost · gifs = your gif slots · videos = YouTube (no slot needed, always on).",
-    "v2.5.2 CLEANUP: temp files auto-delete (1h max age, 15-min sweep) and the bot pings /cleanup after every send — disk stays free.",
-    "v71.2: the bot panel has a '🌐 Scraper Sites' card that lists these exact values live (bot proxies /my-links)."
+    "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics."
   ],
   "links": [
     {
       "slot": 1,
-      "name": "Reddit NSFW (Amateur/Real)",
-      "url": "https://old.reddit.com/search.json?q={query}+nsfw&include_over_18=on",
+      "name": "Realbooru (Real People, Full-Res)",
+      "url": "https://realbooru.com/index.php?page=post&s=list&tags={query}",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 2,
-      "name": "Pornpics (High-Res Stills)",
-      "url": "https://www.pornpics.com/search/{query}",
+      "name": "Xbooru DAPI (Full-Res XML Direct)",
+      "url": "https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 3,
-      "name": "Babehub (Gallery Archive)",
-      "url": "https://www.babehub.com/gallery/{query}",
+      "name": "Rule34.xxx (Biggest Archive, Full-Res)",
+      "url": "https://rule34.xxx/index.php?page=post&s=list&tags={query}",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 4,
-      "name": "DarkNaija (Realistic Porn)",
-      "url": "https://www.darknaija.com/?s={query}",
+      "name": "TBIB (Big Image Board Fallback)",
+      "url": "https://tbib.org/index.php?page=post&s=list&tags={query}",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 5,
-      "name": "Pichunter (Realistic Porn)",
-      "url": "https://www.pichunter.com/search/{query}",
+      "name": "DarkNaija (Real-Porn Blog Fallback)",
+      "url": "https://www.darknaija.com/?s={query}",
       "type": "image",
       "enabled": true
     },

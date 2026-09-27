@@ -140,9 +140,55 @@ function isJunkImageUrl(u) {
     return false;
 }
 
+/* ─── v2.7: BOORU THUMBNAIL → FULL-IMAGE CONVERTER ────────────────
+ * Booru browse pages only expose small /thumbnails/ links, but every
+ * booru stores the FULL original at a predictable sibling path. This
+ * rewrite turns the thumbs into full-res originals. Patterns VERIFIED
+ * live (2026-09-27) with real downloads:
+ *   realbooru  /thumbnails/00/20/thumbnail_HASH.jpg
+ *              → /images/00/20/HASH.jpg              (148KB full JPEG)
+ *   rule34.xxx wimg.rule34.xxx/thumbnails/ID/thumbnail_HASH.jpg
+ *              → rule34.xxx/images/ID/HASH.jpeg      (194KB full JPEG)
+ *   xbooru thumbs use a different (unmapped) scheme — its dapi XML
+ *   already hands out file_url full-res, so no conversion needed.   */
+function booruFullUrls(thumbUrl){
+    const u = String(thumbUrl);
+    const out = [];
+    /* realbooru — same path shape, same extension */
+    let m = u.match(/https?:\/\/realbooru\.com\/thumbnails\/([0-9a-f]{2}\/[0-9a-f]{2})\/thumbnail_([0-9a-f]+)\.(jpe?g|png|gif)/i);
+    if (m) { out.push(`https://realbooru.com/images/${m[1]}/${m[2]}.${m[3].toLowerCase()}`); return out; }
+    /* rule34.xxx — wimg host, thumb .jpg → full .jpeg (verified) + .png hedge */
+    m = u.match(/https?:\/\/(?:wimg\.)?rule34\.xxx\/thumbnails\/(\d+)\/thumbnail_([0-9a-f]+)\.(jpe?g|png)/i);
+    if (m) {
+        out.push(`https://rule34.xxx/images/${m[1]}/${m[2]}.jpeg`);
+        out.push(`https://rule34.xxx/images/${m[1]}/${m[2]}.png`);
+        return out;
+    }
+    return out;
+}
+
+/* ─── v2.7: DAPI XML file_url extractor ───────────────────────────
+ * Gelbooru-family dapi endpoints answer static XML with FULL-RES
+ * originals in file_url="…" attributes. No <img> tags exist, so the
+ * cheerio extractor finds nothing — this regex does. Verified:
+ * xbooru dapi "ebony ass" → 20 file_url attrs, direct
+ * https://img.xbooru.com/images/... downloads.                     */
+function extractDapiFileUrls(text){
+    const out = [];
+    const re = /file_url="([^"]+\.(?:jpe?g|png|gif|webp)(?:\?[^"]*)?)"/gi;
+    let m;
+    while ((m = re.exec(String(text))) !== null){
+        if (!isJunkImageUrl(m[1])) out.push(m[1]);
+        if (out.length >= 40) break;
+    }
+    return out;
+}
+
 module.exports = {
     fetchPage,
     downloadImage,
     extractImageUrls,
-    isJunkImageUrl
+    isJunkImageUrl,
+    booruFullUrls,
+    extractDapiFileUrls
 };

@@ -1,5 +1,43 @@
 # intelligent-scraper
 
+## v2.7.0 (feature, 2026-09-27) — LINK AUDIT: every slot live-verified + 2 engine bugs fixed
+
+WHY: the user asked "verify if all my actual links work and give me new
+links which actually work". Live testing through the REAL pipeline
+(fetchPage → extractor → download probe) proved 5 of 7 slots were dead
+(reddit 403, pornpics WAF-reset, babehub 403, darknaija 0 images,
+pichunter 403) and surfaced 2 real bugs in the v2.6 engines.
+
+1. SLOT AUDIT (each candidate tested for extraction AND download):
+   • DEAD → REPLACED: reddit .json (403), pornpics (WAF), babehub (403),
+     pichunter (403). Also dead: gelbooru (401), motherless (DNS),
+     e621/danbooru/konachan/spankbang/fapello/mult34/imagefap (403/404),
+     xnxx/xvideos (0 static), redgifs API (401).
+   • NEW SLOT 1 realbooru browse — verified 20-41 thumbs → FULL-RES
+     conversion (148KB JPEG probe), download requires own Referer.
+   • NEW SLOT 2 xbooru dapi XML — file_url="…" full-res direct
+     (20 attrs verified).
+   • NEW SLOT 3 rule34.xxx browse — wimg thumbs → FULL-RES
+     (194KB JPEG probe, .jpeg ext).
+   • SLOT 4 tbib browse kept (15 real thumbs, small = fallback only).
+   • SLOT 5 darknaija kept (blog fallback, never breaks a search).
+   • SLOTS 6-7 tenor + giphy VERIFIED working (2 + 353 gifs).
+2. NEW utils.booruFullUrls(): thumbnail → full-original rewrite
+   (realbooru same-ext, rule34 .jpeg/.png hedge). Slot pipeline AND
+   the realbooru engine share it.
+3. NEW utils.extractDapiFileUrls(): file_url="…" regex — dapi XML
+   slots and any XML answer now yield full-res direct URLs.
+4. BUGFIX realbooruImages: tags joined with '_' made ONE unknown tag
+   → 1 result; now '+' (+ full browser headers via fetchPage).
+   Verified 41 thumbs 3/3 runs.
+5. BUGFIX runEngines merge: bucket concat let xbooru (40 hits) fill
+   the whole 40-cap so realbooru never surfaced. Now ROUND-ROBIN
+   interleave in engine priority order — slots lead, boorus MIX.
+6. media.js CDN_REFERER_MAP: + realbooru.com / xbooru / img.xbooru /
+   rule34.xxx / wimg / tbib.org (realbooru refuses downloads without
+   its own Referer).
+7. Version strings → 2.7.0 (package.json, /status, /my-links, /search).
+
 ## v2.6.0 (feature, 2026-09-27) — SEARCH RELEVANCE OVERHAUL — "actually what I searched for"
 
 WHY: panel diagnostics showed 5 of 7 user slots returning 0 results

@@ -277,7 +277,13 @@ const CDN_REFERER_MAP = [
     { test: /pngtree\.com|pngtree-/i,     referer: 'https://pngtree.com/' },
     { test: /freepik\.|static\.freepik/i, referer: 'https://www.freepik.com/' },
     { test: /cleanpng/i,                  referer: 'https://www.cleanpng.com/' },
-    { test: /wallpapercave/i,             referer: 'https://wallpapercave.com/' }
+    { test: /wallpapercave/i,             referer: 'https://wallpapercave.com/' },
+    /* v2.7 booru hosts — realbooru REFUSES downloads without its own
+     * Referer (verified live); the others get the same courtesy. */
+    { test: /(^|\.)realbooru\.com/i,       referer: 'https://realbooru.com/' },
+    { test: /(^|\.)(img\.)?xbooru\.com/i,  referer: 'https://xbooru.com/' },
+    { test: /(^|\.)(wimg\.)?rule34\.xxx/i, referer: 'https://rule34.xxx/' },
+    { test: /(^|\.)tbib\.org/i,            referer: 'https://tbib.org/' }
 ];
 function refererCandidates(u){
     const out = [];
@@ -291,6 +297,8 @@ function refererCandidates(u){
     return [...new Set(out)];
 }
 const RETRY_STATUSES = new Set([403, 404, 418, 429]);   /* 404: some CDNs fake-404 without referer */
+const BLOCKED_CT_RE = /text\/html|application\/json|text\/plain/i;
+function respLen(r){ try { return r.data ? (r.data.byteLength ?? r.data.length ?? 0) : 0; } catch (e) { return 0; } }
 async function fetchWithUaFallback(url, opts) {
     let lastErr = null;
     const attempts = [];
@@ -307,7 +315,18 @@ async function fetchWithUaFallback(url, opts) {
                 headers['Origin']  = a.referer.replace(/\/$/, '');
                 headers['Accept']  = 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
             }
-            return await axios.get(url, Object.assign({}, opts, { headers }));
+            const r = await axios.get(url, Object.assign({}, opts, { headers }));
+            /* v2.7 BLOCKED-PAGE GATE: a 200 that answers a tiny HTML/JSON
+             * body is a hotlink block page, NOT the media — realbooru does
+             * exactly this (22B text/html). Treat it as a refusal and fall
+             * through to the next UA+Referer attempt. */
+            const ct = String((r.headers && r.headers['content-type']) || '');
+            const len = respLen(r);
+            if (BLOCKED_CT_RE.test(ct) || (len > 0 && len < 512 && !/application\/(pdf|octet-stream)/i.test(ct))) {
+                lastErr = new Error('HTTP 200 but blocked page (' + len + 'B ' + (ct.split(';')[0] || '?') + ')');
+                continue;
+            }
+            return r;
         } catch (e) {
             lastErr = e;
             const st = e.response && e.response.status;
