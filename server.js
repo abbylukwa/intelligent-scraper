@@ -83,7 +83,14 @@ function getMyLinks(type, extraLinks){
         }).filter(Boolean);
         slots = reqSlots.concat(slots);          /* per-request links lead */
     }
-    return slots.filter(l => (l.enabled !== false) && String(l.type || 'image') === type);
+    /* v2.5.3 DEDUPE: the bot now HARD-CODES the same 7 sites as
+     * my_links.json and forwards them with every search — without this
+     * filter every URL was fetched TWICE per search (request + file).
+     * First occurrence wins: request links lead, then file, then env. */
+    const seenUrls = new Set();
+    return slots
+        .filter(l => (l.enabled !== false) && String(l.type || 'image') === type)
+        .filter(l => { const u = String(l.url || ''); if (seenUrls.has(u)) return false; seenUrls.add(u); return true; });
 }
 
 // Build the real URL to fetch for a custom link + search word.
@@ -170,7 +177,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.5.1',
+        version: '2.5.3',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -206,7 +213,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.5.1',
+        version: '2.5.3',
         howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,

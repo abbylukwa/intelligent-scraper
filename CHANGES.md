@@ -1,5 +1,29 @@
 # intelligent-scraper
 
+## v2.5.3 (patch, 2026-09-27) — URL DEDUPE + VERSION BUMP
+
+1. getMyLinks() now DEDUPES identical URLs across the three sources
+   (per-request links from the bot, my_links.json file slots, MYLINKS
+   env). Why: the bot (v71.2) HARD-CODES the same 7 sites it forwards
+   with every search — without this filter every URL was fetched TWICE
+   per search. First occurrence wins: request links lead, then file,
+   then env.
+2. Hardcoded /status and /my-links version string bumped '2.5.2' -> '2.5.3'
+   (package.json matches).
+3. Bot-side companion (v71.2): the panel's "🌐 Scraper Sites" card now
+   ALWAYS shows the 7 sites — the bot answers with HARD-CODED values
+   when this service is offline, and live diagnostics when it is up.
+
+## v2.5.2 (patch, 2026-09-27) — REAL LINKS SYNCED + VERSION STRING
+
+1. my_links.json now carries the user's ACTUAL 7 live slots (synced from
+   the running deployment — reddit/pornpics/babehub/darknaija/pichunter
+   images + tenor/giphy gifs, all enabled) so a redeploy from GitHub can
+   never overwrite the real sites with demo placeholders again.
+2. /status and /my-links hardcoded version string corrected '2.5.1' -> '2.5.2'.
+3. Bot-side companion (v71.2): the admin panel now has a "🌐 Scraper
+   Sites" card that proxies /my-links and lists these exact values live.
+
 ## v2.5.2 — EXCLUDE + AUTO-CLEANUP + TENOR SLOT
 
 1. POST /video accepts `exclude` (array of already-sent video ids or
