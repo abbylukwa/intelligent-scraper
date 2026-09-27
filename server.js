@@ -22,17 +22,68 @@ const PORT = process.env.PORT || 10000;
 const fs = require('fs');
 const utils = require('./utils');
 const MY_LINKS_FILE = path.join(__dirname, 'my_links.json');
+
+/* ═══════════════════════════════════════════════════════════════
+ * v2.5 MY LINKS — three ways to add YOUR sites, all merged:
+ *   1. my_links.json (HOT-RELOADED — edit the file, the very next
+ *      search uses it. NO restart needed anymore.)
+ *   2. MYLINKS env var — "url1, url2, url3" (set in Render env,
+ *      no file editing at all)
+ *   3. per-request: POST /search {"myLinks": ["https://..."]}
+ *      — the whatsapp bot forwards its own MYLINKS env
+ *        automatically with EVERY search.
+ *
+ * v2.5 ORDERING FIX: your links are tried FIRST and their results
+ * are placed FIRST in the returned array — the bot downloads
+ * images[0], so previously engine results buried your own sites.
+ * A dead/JS-walled slot never breaks a search — it is skipped,
+ * logged, and recorded in the /my-links diagnostics.
+ * ═══════════════════════════════════════════════════════════ */
 let MY_LINKS = [];
-try {
-    if (fs.existsSync(MY_LINKS_FILE)) {
+let MY_LINKS_MTIME = -1;
+function loadMyLinks(force){
+    try {
+        const st = fs.existsSync(MY_LINKS_FILE) ? fs.statSync(MY_LINKS_FILE) : null;
+        const mtime = st ? st.mtimeMs : 0;
+        if (!force && mtime === MY_LINKS_MTIME) return;
+        MY_LINKS_MTIME = mtime;
+        if (!st){ MY_LINKS = []; return; }
         const raw = JSON.parse(fs.readFileSync(MY_LINKS_FILE, 'utf8'));
         MY_LINKS = Array.isArray(raw.links) ? raw.links.filter(l => l && l.url) : [];
-        console.log(`MY LINKS: loaded ${MY_LINKS.length} slot(s) from my_links.json`);
-    } else {
-        console.log('MY LINKS: my_links.json not found — running on built-in sites only');
+        console.log(`MY LINKS: loaded ${MY_LINKS.length} slot(s) from my_links.json (hot-reload on)`);
+    } catch (e) {
+        console.error('MY LINKS: could not parse my_links.json —', e.message);
     }
-} catch (e) {
-    console.error('MY LINKS: could not parse my_links.json —', e.message);
+}
+loadMyLinks(true);
+
+const MY_LINKS_ENV = String(process.env.MYLINKS || '')
+    .split(/[\n,]+/).map(s => s.trim())
+    .filter(s => /^https?:\/\//i.test(s))
+    .filter((s, i, a) => a.indexOf(s) === i)
+    .map((s, i) => ({ slot: 'env-' + (i + 1), name: 'env slot ' + (i + 1), url: s,
+                      type: /\.gif(\?|$)/i.test(s) ? 'gif' : 'image', enabled: true, source: 'env' }));
+if (MY_LINKS_ENV.length) console.log(`MY LINKS: +${MY_LINKS_ENV.length} slot(s) from MYLINKS env`);
+
+/* per-slot diagnostics — open /my-links to SEE which of your sites
+ * really return media and which are JS-walled (0 results) */
+const MY_LINK_DIAG = new Map();
+function diagRecord(key, count, error){
+    MY_LINK_DIAG.set(key, { ts: new Date().toISOString(), count: count || 0, error: error || null });
+}
+
+function getMyLinks(type, extraLinks){
+    loadMyLinks(false);
+    let slots = MY_LINKS.map(l => Object.assign({ source: 'file' }, l)).concat(MY_LINKS_ENV);
+    if (Array.isArray(extraLinks) && extraLinks.length){
+        const reqSlots = extraLinks.map((l, i) => {
+            if (typeof l === 'string')
+                return { url: l, type: /\.gif(\?|$)/i.test(l) ? 'gif' : 'image', name: 'bot-link-' + (i + 1), source: 'request' };
+            return (l && l.url) ? Object.assign({ source: 'request' }, l) : null;
+        }).filter(Boolean);
+        slots = reqSlots.concat(slots);          /* per-request links lead */
+    }
+    return slots.filter(l => (l.enabled !== false) && String(l.type || 'image') === type);
 }
 
 // Build the real URL to fetch for a custom link + search word.
@@ -61,9 +112,7 @@ function myLinkUrl(link, query) {
  * searches with Bing site: so your sites return REAL content images. */
 function myLinkDomains(type){
     const out = new Set();
-    for (const l of MY_LINKS){
-        if (l.enabled === false) continue;
-        if (String(l.type || 'image') !== type) continue;
+    for (const l of getMyLinks(type)){
         try { out.add(new URL(l.url).hostname.replace(/^www\./, '')); } catch (e) {}
     }
     return [...out];
@@ -72,8 +121,8 @@ function myLinkDomains(type){
 // Try every enabled custom link of `type`; returns an array of direct
 // media URLs found. A dead/dummy link NEVER breaks a search — each slot
 // fails independently, is skipped and logged.
-async function tryMyLinks(query, type) {
-    const slots = MY_LINKS.filter(l => (l.enabled !== false) && String(l.type || 'image') === type);
+async function tryMyLinks(query, type, extraLinks) {
+    const slots = getMyLinks(type, extraLinks);
     if (!slots.length) return [];
     const found = [];
     await Promise.all(slots.map(async (link) => {
@@ -91,11 +140,13 @@ async function tryMyLinks(query, type) {
                 urls = await utils.extractImageUrls(String(html), url);
             }
             urls = [...new Set(urls)].slice(0, 30);
+            diagRecord(String(link.url), urls.length, urls.length ? null : '0 media in static HTML (JS-walled? the Bing site: boost still covers this domain)');
             if (urls.length) console.log(`MY LINKS: "${link.name || link.url}" → ${urls.length} ${type}(s)`);
-            else console.log(`MY LINKS: "${link.name || link.url}" → no ${type}s found (dummy link? replace it in my_links.json)`);
+            else console.log(`MY LINKS: "${link.name || link.url}" → no ${type}s found (page may need JS — Bing site: boost still covers this domain)`);
             found.push(...urls);
         } catch (e) {
-            console.log(`MY LINKS: "${link.name || link.url}" skipped (${e.message}) — replace it in my_links.json`);
+            diagRecord(String(link.url), 0, e.message);
+            console.log(`MY LINKS: "${link.name || link.url}" skipped (${e.message}) — check /my-links diagnostics`);
         }
     }));
     return found;
@@ -119,7 +170,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.4.0',
+        version: '2.5.1',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -141,20 +192,27 @@ app.get('/status', (req, res) => {
         ],
         myLinks: {
             loaded: MY_LINKS.length,
-            enabled: MY_LINKS.filter(l => l.enabled !== false).length
+            enabled: MY_LINKS.filter(l => l.enabled !== false).length,
+            envSlots: MY_LINKS_ENV.length,
+            hotReload: true,
+            triedFirst: true
         }
     });
 });
 
-// MY LINKS status — see your 7 slots and whether they are loaded
+// MY LINKS status — live diagnostics for every slot you added
 app.get('/my-links', (req, res) => {
+    loadMyLinks(false);
+    const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        file: 'my_links.json',
-        howTo: 'Edit my_links.json → put your own URL in "url", keep {query} where the search word goes, set type "image" or "gif", enabled true/false. Restart the service. Built-in sites were not touched.',
+        version: '2.5.1',
+        howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
-        links: MY_LINKS
+        envSlots: MY_LINKS_ENV.map(l => l.url),
+        links: MY_LINKS.map(l => Object.assign({}, l, { lastResult: diag(l.url) })),
+        envLinkDiag: MY_LINKS_ENV.map(l => Object.assign({}, l, { lastResult: diag(l.url) }))
     });
 });
 
@@ -197,9 +255,12 @@ app.post('/search', dataApi, async (req, res) => {
         console.log(`Searching images for: "${searchQuery}" (site=${site}, nsfw=${!!nsfw})`);
         const urls = await album.searchImages(searchQuery, site, { nsfw: nsfw === true, boostDomains: myLinkDomains('image') });
 
-        // MY LINKS: merge results from your own sites (my_links.json)
-        const myUrls = await tryMyLinks(searchQuery, 'image');
-        const allUrls = [...new Set([...urls, ...myUrls])];
+        // MY LINKS: your sites (file + env + request) are tried FIRST
+        const myUrls = await tryMyLinks(searchQuery, 'image', req.body?.myLinks);
+        if (myUrls.length) console.log(`[search] ${myUrls.length} image(s) from MY LINKS — placed FIRST`);
+        /* v2.5 ORDERING FIX: your links LEAD the array — the bot
+         * downloads images[0], so engine results used to bury them. */
+        const allUrls = [...new Set([...myUrls, ...urls])];
         
         res.json({ 
             success: true,
@@ -207,7 +268,8 @@ app.post('/search', dataApi, async (req, res) => {
             images: allUrls, 
             count: allUrls.length,
             source: site,
-            myLinks: myUrls.length
+            myLinks: myUrls.length,
+            myLinksFirst: myUrls.length > 0
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -394,16 +456,21 @@ app.get('/gif', dataApi, async (req, res) => {
         console.log(`Searching GIFs for: "${q}"`);
         const gifUrls = await gif.search(q);
 
-        // MY LINKS: merge GIFs from your own sites (my_links.json)
-        const myGifs = await tryMyLinks(q, 'gif');
-        const allGifs = [...new Set([...gifUrls, ...myGifs])];
+        // MY LINKS: your GIF sites first (hot-reloaded file + env)
+        // v2.5.1: the bot can also forward ITS OWN MYLINKS env per request
+        const extraGifLinks = String(req.query.myLinks || '')
+            .split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
+        const myGifs = await tryMyLinks(q, 'gif', extraGifLinks);
+        /* v2.5: same ordering fix as /search — your GIFs lead */
+        const allGifs = [...new Set([...myGifs, ...gifUrls])];
         
         res.json({ 
             success: true,
             query: q,
             gifs: allGifs, 
             count: allGifs.length,
-            myLinks: myGifs.length
+            myLinks: myGifs.length,
+            myLinksFirst: myGifs.length > 0
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -543,6 +610,16 @@ app.use((err, req, res, next) => {
         message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
     });
 });
+
+/* v2.5: periodic temp hygiene on long runs — /temp self-clears every
+ * 30 min (files older than the temp TTL go first) so a busy bot never
+ * fills the Render disk. */
+setInterval(function(){
+    try {
+        const r = temp.cleanup();
+        if (r && r.deletedCount) console.log('[cleanup] removed ' + r.deletedCount + ' old temp file(s), freed ' + (r.freedSpaceMB || 0) + 'MB');
+    } catch (e) { console.error('[cleanup] failed:', e.message); }
+}, 30 * 60 * 1000).unref();
 
 // Start server
 app.listen(PORT, () => {

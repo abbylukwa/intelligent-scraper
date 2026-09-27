@@ -260,23 +260,63 @@ async function ytDownload(idOrUrl, kind, baseUrl) {
 /* ── Generic direct-URL download (mp3 sites, image CDNs, etc.) ──
  * v2.4: UA fallback chain — some CDNs (Wikimedia thumb server) 403
  * browser-style UAs and REQUIRE an honest bot UA, while most other
- * sites are the opposite. Try one, on 403/429 retry with the other. */
+ * sites are the opposite. Try one, on 403/429 retry with the other.
+ * v2.5: REFERER fallback — the real fix for the 500 on your own-site
+ * images: hotlink-protected CDNs (pngtree via cloudfront
+ * dygtyjqp7pi0m.cloudfront.net, some wp/CDN hosts) reject ANY request
+ * without a same-site Referer. We now try: plain bot UA → plain
+ * browser UA → browser UA + mapped/derived Referer. A refused CDN now
+ * also produces an HUMAN error instead of a bare axios 500. */
 const FETCH_UAS = [
-    'BreadBotScraper/2.4 (media fetcher; contact: admin@breadbot.local)',
+    'BreadBotScraper/2.5 (media fetcher; contact: admin@breadbot.local)',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 ];
+/* known CDN → the site that must appear as Referer */
+const CDN_REFERER_MAP = [
+    { test: /cloudfront\.net\/i\/\d+\//i, referer: 'https://pngtree.com/' },
+    { test: /pngtree\.com|pngtree-/i,     referer: 'https://pngtree.com/' },
+    { test: /freepik\.|static\.freepik/i, referer: 'https://www.freepik.com/' },
+    { test: /cleanpng/i,                  referer: 'https://www.cleanpng.com/' },
+    { test: /wallpapercave/i,             referer: 'https://wallpapercave.com/' }
+];
+function refererCandidates(u){
+    const out = [];
+    for (const m of CDN_REFERER_MAP){ if (m.test.test(u)) out.push(m.referer); }
+    try {
+        const pu = new URL(u);
+        /* pngtree-style path pattern (/i/<numeric-id>/…) on any host */
+        if (/^\/i\/\d+\//.test(pu.pathname)) out.push('https://pngtree.com/');
+        out.push(pu.protocol + '//' + pu.hostname + '/');   /* same-origin — the common case */
+    } catch (e) {}
+    return [...new Set(out)];
+}
+const RETRY_STATUSES = new Set([403, 404, 418, 429]);   /* 404: some CDNs fake-404 without referer */
 async function fetchWithUaFallback(url, opts) {
     let lastErr = null;
-    for (const ua of FETCH_UAS){
+    const attempts = [];
+    attempts.push({ ua: FETCH_UAS[0], referer: null });   /* honest bot UA — Wikimedia needs this */
+    attempts.push({ ua: FETCH_UAS[1], referer: null });   /* plain browser UA */
+    for (const ref of refererCandidates(url)){
+        attempts.push({ ua: FETCH_UAS[1], referer: ref }); /* browser UA + Referer — hotlink CDNs need this */
+    }
+    for (const a of attempts){
         try {
-            return await axios.get(url, Object.assign({}, opts, { headers: Object.assign({}, (opts && opts.headers) || {}, { 'User-Agent': ua }) }));
+            const headers = Object.assign({}, (opts && opts.headers) || {}, { 'User-Agent': a.ua });
+            if (a.referer){
+                headers['Referer'] = a.referer;
+                headers['Origin']  = a.referer.replace(/\/$/, '');
+                headers['Accept']  = 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
+            }
+            return await axios.get(url, Object.assign({}, opts, { headers }));
         } catch (e) {
             lastErr = e;
             const st = e.response && e.response.status;
-            if (st !== 403 && st !== 429 && st !== 418) throw e;   /* non-UA problem — do not retry */
+            if (!RETRY_STATUSES.has(st)) throw e;   /* non-UA/referer problem — do not retry */
         }
     }
-    throw lastErr;
+    const st = lastErr && lastErr.response && lastErr.response.status;
+    throw new Error('CDN refused the download (last status ' + (st || 'n/a') +
+        ') — hotlink protection. The bot automatically tries the next result.');
 }
 async function genericDownload(url, kind, baseUrl) {
     const cap = MAX_MB * 1024 * 1024;

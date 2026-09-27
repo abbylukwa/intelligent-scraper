@@ -1,5 +1,38 @@
 # intelligent-scraper
 
+## v2.5.0 — YOUR SITES FIRST + HOTLINK-SAFE DOWNLOADS
+
+### 1. Download 500 on my-link CDN images (the boss's log)
+`scraper download "https://dygtyjqp7pi0m.cloudfront.net/i/66451/…jpg": 500`
+media.js retried only User-Agents; hotlink-protected CDNs (pngtree via
+cloudfront) require a same-site Referer. v2.5 attempt chain:
+honest bot UA → browser UA → browser UA + mapped/derived
+Referer+Origin+Accept; retries 403/404/418/429; the final error is
+human ("CDN refused — hotlink protection; the bot tries the next
+result"). The BOT also now retries up to 4 candidates.
+
+### 2. Your links are tried FIRST (ordering bug)
+/search and /gif merged my-link results LAST while the bot downloads
+images[0] — your own sites could never win. v2.5: `[...myUrls, ...urls]`
++ `myLinksFirst: true` in the response.
+
+### 3. Three ways to add your sites (all merged)
+my_links.json (HOT-RELOADED — edit → next search, no restart) + MYLINKS
+env (comma-separated URLs, on this service OR on the bot, which forwards
+its own automatically) + per-request POST /search {"myLinks":[…]}.
+Per-request links lead the slot list.
+
+### 4. Diagnostics — SEE which slots work
+GET /my-links now returns per-slot lastResult {ts, count, error}
+(JW-walled pages are labeled as such — the Bing site: boost still covers
+them), plus envSlots. /status gained hotReload/triedFirst/envSlots.
+
+### 5. Hygiene
+/temp self-cleanup every 30 min; version 2.5.0; my_links.demo.json
+shows actual-value examples of all three URL forms.
+
+# intelligent-scraper
+
 ## v2.4.0 — REAL IMAGE SEARCH (the logo problem is dead)
 
 ### The problem (user evidence)
