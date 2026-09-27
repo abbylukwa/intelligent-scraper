@@ -513,21 +513,28 @@ app.post('/music', dataApi, async (req, res) => {
 // Bot: POST /video {query} -> expects { mediaUrl, title, mimetype, sizeBytes }
 app.post('/video', dataApi, async (req, res) => {
     try {
-        const { query, q } = req.body || {};
+        const { query, q, exclude } = req.body || {};
         const searchQuery = query || q;
         if (!searchQuery || String(searchQuery).trim() === '') {
             return res.status(400).json({ error: 'Query parameter is required', example: { "query": "funny video" } });
         }
         console.log(`[video] Searching YouTube for: "${searchQuery}"`);
-        const vids = await media.ytSearch(searchQuery, 5);
-        if (!vids.length) return res.status(404).json({ error: 'No results', message: 'No YouTube results for "' + searchQuery + '"' });
+        /* v2.5.2 EXCLUDE: the bot passes already-sent video ids/titles so a
+         * "send 6 videos of horse racing" run drops SIX DIFFERENT clips
+         * instead of the same top result over and over. */
+        const excl = new Set((Array.isArray(exclude) ? exclude : []).map(x => String(x).toLowerCase().trim()).filter(Boolean));
+        const found = await media.ytSearch(searchQuery, 10);
+        if (!found.length) return res.status(404).json({ error: 'No results', message: 'No YouTube results for "' + searchQuery + '"' });
+        const fresh = found.filter(v => !excl.has(String(v.id).toLowerCase()) && !excl.has(String(v.title || '').toLowerCase().trim()));
+        const vids = fresh.length ? fresh : found;   /* all already sent? fall back to full list */
+        if (excl.size) console.log(`[video] ${found.length} found, ${fresh.length} after excluding ${excl.size} already-sent`);
         const baseUrl = req.protocol + '://' + req.get('host');
         let lastErr = null;
         for (const v of vids) {
             try {
                 const out = await media.ytDownload(v.id, 'video', baseUrl);
                 console.log(`[video] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
-                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, mimetype: out.mimetype || 'video/mp4', kind: 'video', sizeBytes: out.sizeBytes });
+                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, videoId: v.id, mimetype: out.mimetype || 'video/mp4', kind: 'video', sizeBytes: out.sizeBytes, results: found.slice(0, 5).map(x => ({ id: x.id, title: x.title })) });
             } catch (e) { lastErr = e; console.error('[video] attempt failed:', e.message); }
         }
         throw lastErr || new Error('All download attempts failed');
@@ -579,6 +586,14 @@ app.post('/cleanup', dataApi, (req, res) => {
         });
     }
 });
+
+// ─── v2.5.2 PERIODIC TEMP SWEEP — disk stays clean even on idle days ───
+setInterval(() => {
+    try {
+        const r = temp.cleanup();
+        if (r && r.deletedCount) console.log(`[temp] sweep: ${r.deletedCount} file(s), ${(r.freedSpaceMB || 0).toFixed(1)}MB freed`);
+    } catch (e) {}
+}, 15 * 60 * 1000).unref?.();
 
 // 404 handler
 app.use((req, res) => {

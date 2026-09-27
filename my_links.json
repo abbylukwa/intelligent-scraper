@@ -1,60 +1,69 @@
 {
-  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.5 (REALISTIC EDITION) ===",
+  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.5 (HOT-RELOADED) ===",
   "_HOW_TO": [
-    "1. {query} is replaced by your search word (e.g., 'milf', 'petite', 'anal').",
-    "2. 'type': 'image' for stills/galleries, 'gif' for looping animations.",
-    "3. 'enabled': true means the scraper hits this site.",
-    "4. Results from these links lead the list; they are tried before the built-in defaults."
+    "PUT any website link in a slot's 'url'. Three kinds work:",
+    "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
+    "  2. Category page: https://www.cleanpng.com/free/christmas.html -> fetched AS-IS (do not add ?s= yourself).",
+    "  3. Template:     https://mysite.com/search?q={query} -> {query} is replaced by the search word.",
+    "'type': 'image' or 'gif'. 'enabled': false switches a slot off without deleting it.",
+    "v2.5 HOT-RELOAD: edit this file and the NEXT search already uses it — NO restart needed.",
+    "v2.5 YOUR LINKS ARE TRIED FIRST and their results LEAD the list (the bot downloads images[0]).",
+    "v2.5 no-file option: set MYLINKS env var on this service or on the bot (comma-separated URLs).",
+    "CHECK /my-links in a browser — per-slot diagnostics: lastResult {count, error, ts}.",
+    "v2.5 hotlink fix: pngtree/cloudfront downloads now send Referer automatically; the bot also retries the next result.",
+    "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics.",
+    "v2.5.2 THREE ENGINES: images = your slots + Bing boost · gifs = your gif slots (tenor example below) · videos = YouTube (no slot needed, always on).",
+    "v2.5.2 CLEANUP: temp files auto-delete (1h max age, 15-min sweep) and the bot pings /cleanup after every send — disk stays free."
   ],
   "links": [
     {
       "slot": 1,
-      "name": "Reddit NSFW (Amateur/Real)",
-      "url": "https://www.reddit.com/search?q={query}+nsfw",
+      "name": "pngtree (example — real images via Bing site: boost)",
+      "url": "https://pngtree.com",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 2,
-      "name": "Pornpics (High-Res Stills)",
-      "url": "https://www.pornpics.com/search/{query}",
+      "name": "MY-SITE-2 (replace me or set enabled:false)",
+      "url": "https://www.replace-me-2.com/?s={query}",
       "type": "image",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 3,
-      "name": "Babehub (Gallery Archive)",
-      "url": "https://www.babehub.com/gallery/{query}",
+      "name": "MY-SITE-3 (replace me or set enabled:false)",
+      "url": "https://www.replace-me-3.com/gallery/{query}",
       "type": "image",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 4,
-      "name": "DarkNaija (Realistic Porn)",
-      "url": "https://www.darknaija.com/search/{query}",
+      "name": "MY-SITE-4 (replace me or set enabled:false)",
+      "url": "https://www.replace-me-4.com/search/{query}",
       "type": "image",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 5,
-      "name": "Pichunter (Realistic Porn)",
-      "url": "https://www.pichunter.com/gallery/{query}",
+      "name": "MY-SITE-5 (replace me or set enabled:false)",
+      "url": "https://www.replace-me-5.com/?search={query}",
       "type": "image",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 6,
-      "name": "Tenor Porn GIFs (The Loop King)",
-      "url": "https://tenor.com/search/{query}-porn-gifs",
+      "name": "Tenor GIFs (working example — hot-reloaded)",
+      "url": "https://tenor.com/search/{query}-gifs",
       "type": "gif",
       "enabled": true
     },
     {
       "slot": 7,
-      "name": "Giphy Adult (Polished Loops)",
-      "url": "https://giphy.com/search/{query}+porn",
+      "name": "MY-GIF-SITE-7 (replace me or set enabled:false)",
+      "url": "https://www.replace-me-7.com/search/{query}/gifs",
       "type": "gif",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

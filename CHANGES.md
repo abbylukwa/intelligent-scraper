@@ -1,5 +1,22 @@
 # intelligent-scraper
 
+## v2.5.2 — EXCLUDE + AUTO-CLEANUP + TENOR SLOT
+
+1. POST /video accepts `exclude` (array of already-sent video ids or
+   titles) and `videoId` in the response — the bot can now request 6
+   DIFFERENT videos for one scheduled run instead of the same clip.
+   Search widened to top-10 candidates.
+2. PERIODIC TEMP SWEEP every 15 min (1 h max file age, on top of the
+   existing on-add cleanup) — disk stays free even on idle days.
+3. my_links.json: gif slot example switched to a working Tenor
+   template (https://tenor.com/search/{query}-gifs) and ENABLED —
+   three live engines out of the box: images (your links + Bing),
+   gifs (Tenor slot), videos (YouTube, always on). Hot-reload intact.
+
+package 2.5.2.
+
+# intelligent-scraper
+
 ## v2.5.0 — YOUR SITES FIRST + HOTLINK-SAFE DOWNLOADS
 
 ### 1. Download 500 on my-link CDN images (the boss's log)
