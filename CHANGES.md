@@ -1,5 +1,38 @@
 # intelligent-scraper
 
+## v2.6.0 (feature, 2026-09-27) — SEARCH RELEVANCE OVERHAUL — "actually what I searched for"
+
+WHY: panel diagnostics showed 5 of 7 user slots returning 0 results
+(JS-walled reddit, JS pornpics, wrong URL patterns) and Bing shipping
+SafeSearch ON for datacenter IPs — so every NSFW image search emptied
+out and the bot fell back to random 5-21KB junk gifs. The user asked
+for "a better version — the actual nsfw content".
+
+1. TWO NEW FULL-RES NSFW ENGINES (static, keyless, verified live):
+   • xbooru — Gelbooru-style dapi XML, multi-word tags ("ebony+ass" →
+     103 posts), direct file_url originals, 40 per search.
+   • realbooru — real-porn booru HTML browse; thumbnails convert to
+     full via /thumbnails/XX/YY/thumbnail_HASH.jpg → /images/XX/YY/HASH.jpg
+     (downloads send the same-origin Referer they require).
+2. Bing Images now requests ADULT MODE (adlt=off URL param + ADLT=OFF
+   cookie) + regex murl fallback when the HTML shape changes.
+3. Reddit engine rebuilt: query-aware old.reddit.com/search.json
+   (include_over_18=on) replaces the hardcoded r/boobs listing.
+4. PRIORITY ORDER FIX: engine results now merge in priority order
+   (your slots → xbooru → realbooru → reddit → bing → flickr → …),
+   NOT in HTTP-completion order — Flickr used to lead because it
+   answered first, so the bot downloaded a random SFW photo.
+5. GIF channel MERGE-ALL: tenor + giphy + reddit all run and merge
+   (deduped) instead of stopping at the first source.
+6. JSON SLOTS: any my_links.json slot URL ending in .json is parsed as
+   JSON — slot 1 is now old.reddit.com/search.json?q={query}
+   &include_over_18=on (NSFW reddit answers datacenter IPs).
+7. Slot pattern fixes: darknaija /search/{query} → /?s={query}
+   (WordPress standard), pichunter /gallery/{query} → /search/{query}.
+8. Per-engine diagnostics: /search and /gif responses carry
+   engines:{name:count} — the bot panel shows exactly which engine
+   delivered. Cap raised 25 → 40. /my-links diag text updated.
+
 ## v2.5.3 (patch, 2026-09-27) — URL DEDUPE + VERSION BUMP
 
 1. getMyLinks() now DEDUPES identical URLs across the three sources

@@ -52,18 +52,28 @@ async function searchRedditGifs(query) {
 }
 
 // ─── Main search — try all sources ────────────────────────
-async function search(query) {
+async function search(query, diag) {
     console.log(`[GIF] Searching "${query}"`);
+    /* v2.6 MERGE-ALL: the old first-hit return meant one weak source
+     * (tenor HTML → 1 gif) starved the others. All sources now run and
+     * merge, deduped — the bot still downloads the first that works. */
     const sources = [searchTenor, searchGiphyScrape, searchRedditGifs];
-    for (const fn of sources) {
-        const results = await fn(query);
-        if (results.length > 0) {
-            console.log(`[GIF] Found ${results.length} from ${fn.name}`);
-            return results;
+    const all = [];
+    const names = ['tenor', 'giphy', 'reddit'];
+    await Promise.all(sources.map(async (fn, i) => {
+        try {
+            const r = await fn(query);
+            const clean = (r || []).filter(Boolean);
+            if (diag) diag[names[i]] = clean.length;
+            all.push(...clean);
+        } catch (e) {
+            if (diag) diag[names[i]] = 0;
+            console.error(`[GIF] ${fn.name} failed:`, e.message);
         }
-    }
-    console.log(`[GIF] No results from any source`);
-    return [];
+    }));
+    const merged = [...new Set(all)];
+    console.log(`[GIF] "${query}" → ${merged.length} gif(s) total`);
+    return merged;
 }
 
 module.exports = { search };

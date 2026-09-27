@@ -27,21 +27,94 @@ const ALBUM_MAP = {};
 const ENGINE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const axios = require('axios');
 
+/* v2.6 ADULT MODE: Bing ships SafeSearch ON for datacenter IPs — every
+ * NSFW query came back empty, which is why the bot kept falling back to
+ * random gifs. adlt=off (URL + cookie) disables it where the IP allows.
+ * A regex fallback also catches murl when the HTML shape changes. */
 async function bingImages(q, siteDomain){
     const query = siteDomain ? `${q} site:${siteDomain}` : q;
-    const url = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&form=HDRSC2&first=1`;
+    const url = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&form=HDRSC2&first=1&adlt=off`;
     const r = await axios.get(url, { headers: {
         'User-Agent': ENGINE_UA,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Cookie': 'SRCHHPGUSR=SRCHLANG=en'
+        'Cookie': 'SRCHHPGUSR=SRCHLANG=en&ADLT=OFF'
     }, timeout: 15000 });
     const $ = require('cheerio').load(r.data);
     const out = [];
     $('a.iusc').each((i, el) => {
         try { const m = JSON.parse($(el).attr('m')); if (m && m.murl && !utils.isJunkImageUrl(m.murl)) out.push(m.murl); } catch (e) {}
     });
+    if (!out.length) {
+        const raw = String(r.data).match(/"murl":"(.*?)"/g) || [];
+        for (const m of raw){
+            try {
+                const u = JSON.parse('"' + m.slice(8) + '"').replace(/\\u0026/g, '&').replace(/\\/g, '');
+                if (u.startsWith('http') && !utils.isJunkImageUrl(u)) out.push(u);
+            } catch (e) {}
+        }
+    }
     return out;
+}
+
+/* ═══ v2.6 NEW ENGINES — the adult-content workhorses ═══
+ * Why: 5 of the 7 user slots returned 0 results (JS-walled / wrong
+ * patterns / DC-blocked) and Bing SafeSearch hid NSFW — so image
+ * searches degenerated into random gif fallbacks. These two booru
+ * engines are STATIC HTML/XML, keyless, and return FULL-RES originals:
+ *
+ *  • xbooru (Gelbooru-style dapi XML): tags="ebony+ass" → file_url
+ *    https://img.xbooru.com/images/... — direct, no conversion.
+ *  • realbooru (REAL-porn booru, HTML browse): thumbnails convert to
+ *    full via /thumbnails/XX/YY/thumbnail_HASH.jpg → /images/XX/YY/HASH.jpg
+ *    (downloads need Referer: realbooru.com — media.js same-origin
+ *    fallback already sends it).
+ *  • reddit query JSON (best effort): old.reddit.com/search.json —
+ *    datacenter IPs are often blocked, so it never breaks the chain. */
+
+async function xbooruImages(q){
+    const tags = String(q).trim().replace(/\s+/g, '+');
+    const url = `https://xbooru.com/index.php?page=dapi&s=post&q=index&tags=${encodeURIComponent(tags).replace(/%2B/g, '+')}&limit=50`;
+    const r = await axios.get(url, { headers: { 'User-Agent': ENGINE_UA }, timeout: 15000 });
+    const out = [];
+    const re = /file_url="([^"]+)"/g; let m;
+    while ((m = re.exec(String(r.data))) !== null){
+        if (!utils.isJunkImageUrl(m[1])) out.push(m[1]);
+    }
+    return out.slice(0, 40);
+}
+
+async function realbooruImages(q){
+    const tags = String(q).trim().replace(/\s+/g, '_');
+    const url = `https://realbooru.com/index.php?page=post&s=list&tags=${encodeURIComponent(tags)}`;
+    const r = await axios.get(url, { headers: {
+        'User-Agent': ENGINE_UA, 'Referer': 'https://realbooru.com/'
+    }, timeout: 15000 });
+    const thumbs = String(r.data).match(/https?:\/\/realbooru\.com\/thumbnails\/[0-9a-f]{2}\/[0-9a-f]{2}\/thumbnail_[0-9a-f]+\.(?:jpg|png|gif|jpeg)/gi) || [];
+    const out = [];
+    for (const t of thumbs){
+        /* /thumbnails/XX/YY/thumbnail_HASH.ext → /images/XX/YY/HASH.ext */
+        const full = t.replace('/thumbnails/', '/images/').replace('thumbnail_', '');
+        if (!utils.isJunkImageUrl(full)) out.push(full);
+        if (out.length >= 30) break;
+    }
+    return out;
+}
+
+async function redditQueryImages(q){
+    const r = await axios.get('https://old.reddit.com/search.json', {
+        params: { q: q, include_over_18: 'on', limit: 40, sort: 'relevance' },
+        headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/2.6' }, timeout: 15000 });
+    const children = r.data?.data?.children || [];
+    const out = [];
+    for (const c of children){
+        const d = c.data || {};
+        const u = d.url_overridden_by_dest || '';
+        if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(u)) out.push(u);
+        const pv = d.preview?.images?.[0]?.source?.url || '';
+        if (pv) out.push(pv.replace(/&amp;/g, '&'));
+    }
+    return [...new Set(out)].filter(u => !utils.isJunkImageUrl(u)).slice(0, 30);
 }
 
 async function flickrImages(q){
@@ -91,17 +164,27 @@ function relevantFirst(urls, q){
     return [...urls].sort((a, b) => score(a) - score(b));
 }
 
-async function runEngines(list){
-    const found = [];
-    await Promise.all(list.map(async (fn) => {
+async function runEngines(list, diag){
+    /* v2.6.1 PRIORITY ORDER: results are bucketed PER ENGINE and merged
+     * in the engine array's order — NOT in network completion order.
+     * (The bot downloads images[0]; before this fix whichever engine's
+     * HTTP finished first — often Flickr SFW photos — led the list
+     * ahead of the actual NSFW results.) */
+    const buckets = new Array(list.length).fill(null);
+    await Promise.all(list.map(async (e, i) => {
         try {
-            const urls = await fn();
+            const urls = await e.f();
             const clean = (urls || []).filter(u => !utils.isJunkImageUrl(u));
-            if (clean.length) found.push(...clean);
-        } catch (e) {
-            console.error('[engine] failed:', e.message);
+            buckets[i] = clean;
+            if (diag) diag[e.n] = clean.length;
+        } catch (err) {
+            buckets[i] = [];
+            if (diag) diag[e.n] = 0;
+            console.error('[engine] ' + (e.n || '?') + ' failed:', err.message);
         }
     }));
+    const found = [];
+    for (const b of buckets){ if (b && b.length) found.push(...b); }
     return found;
 }
 
@@ -120,39 +203,44 @@ async function searchImages(query, site = 'auto', opts = {}) {
         reddit:       { url: `https://old.reddit.com/r/boobs/top/.json?limit=20`, extractor: extractRedditImages }
     };
 
+    /* v2.6: engines are {n, f} pairs — runEngines records per-engine
+     * counts into opts.diag so the panel can show WHICH engine saved
+     * the search. Order = relevance priority, deduped at merge. */
+    const diag = opts.diag || null;
     const engines = [];
     /* 1 — the user's own domains first, via Bing site: operator */
-    for (const d of boostDomains.slice(0, 3)) engines.push(() => bingImages(q, d));
-    /* 2 — general engines */
-    if (site === 'auto' || site === 'bing')     engines.push(() => bingImages(q));
-    if (site === 'auto' || site === 'flickr')   engines.push(() => flickrImages(q));
-    if (site === 'auto' || site === 'commons')  engines.push(() => commonsImages(q));
-    if (site === 'auto' || site === 'wikipedia')engines.push(() => wikipediaImages(q));
-    if (site === 'auto' || site === 'openclipart') engines.push(() => openclipartImages(q));
-    /* 3 — NSFW chain only when explicitly asked */
+    for (const d of boostDomains.slice(0, 3)) engines.push({ n: 'bing:' + d, f: () => bingImages(q, d) });
+    /* 2 — v2.6 adult workhorses: static, keyless, full-res. They run on
+     * EVERY query (they simply return 0 for SFW words like "fish"). */
+    engines.push({ n: 'xbooru',    f: () => xbooruImages(q) });
+    engines.push({ n: 'realbooru', f: () => realbooruImages(q) });
+    engines.push({ n: 'reddit',   f: () => redditQueryImages(q) });
+    /* 3 — general engines */
+    if (site === 'auto' || site === 'bing')     engines.push({ n: 'bing', f: () => bingImages(q) });
+    if (site === 'auto' || site === 'flickr')   engines.push({ n: 'flickr', f: () => flickrImages(q) });
+    if (site === 'auto' || site === 'commons')  engines.push({ n: 'commons', f: () => commonsImages(q) });
+    if (site === 'auto' || site === 'wikipedia')engines.push({ n: 'wikipedia', f: () => wikipediaImages(q) });
+    if (site === 'auto' || site === 'openclipart') engines.push({ n: 'openclipart', f: () => openclipartImages(q) });
+    /* 4 — legacy NSFW chain (pornpics needs JS on their site — best effort) */
     if (nsfw){
-        engines.push(async () => {
+        engines.push({ n: 'pornpics', f: async () => {
             const html = await utils.fetchPage(LEGACY.pornpics.url);
             return extractPornPicsImages(html, LEGACY.pornpics.url);
-        });
-        engines.push(async () => {
-            const html = await utils.fetchPage(LEGACY.reddit.url);
-            return extractRedditImages(html, LEGACY.reddit.url);
-        });
+        }});
     }
-    /* 4 — legacy SFW blog sites as last-ditch attempts */
+    /* 5 — legacy SFW blog sites as last-ditch attempts */
     if (site === 'auto' || site === 'darknaija' || site === 'imagefaqs'){
         for (const key of ['darknaija', 'imagefaqs']){
             if (site !== 'auto' && site !== key) continue;
-            engines.push(async () => {
+            engines.push({ n: key, f: async () => {
                 const html = await utils.fetchPage(LEGACY[key].url);
                 return LEGACY[key].extractor(html, LEGACY[key].url);
-            });
+            }});
         }
     }
 
-    let urls = await runEngines(engines);
-    urls = relevantFirst([...new Set(urls)], q).slice(0, 25);
+    let urls = await runEngines(engines, diag);
+    urls = relevantFirst([...new Set(urls)], q).slice(0, 40);   /* v2.6: 25 → 40 */
     if (urls.length) console.log(`[search] "${q}" (site=${site}${nsfw ? ' nsfw' : ''}) → ${urls.length} images`);
     return urls;
 }

@@ -1,5 +1,5 @@
 {
-  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.5 (HOT-RELOADED) — SYNCED WITH LIVE DEPLOY 2026-09-27 ===",
+  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.6 (HOT-RELOADED) — SYNCED WITH LIVE DEPLOY 2026-09-27 ===",
   "_HOW_TO": [
     "PUT any website link in a slot's 'url'. Three kinds work:",
     "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
@@ -10,7 +10,8 @@
     "v2.5 YOUR LINKS ARE TRIED FIRST and their results LEAD the list (the bot downloads images[0]).",
     "v2.5 no-file option: set MYLINKS env var on this service or on the bot (comma-separated URLs).",
     "CHECK /my-links in a browser — per-slot diagnostics: lastResult {count, error, ts}.",
-    "v2.5 hotlink fix: pngtree/cloudfront downloads now send Referer automatically; the bot also retries the next result.",
+    "v2.6 JSON SLOTS: any slot url ending in .json is parsed as JSON (reddit search API works: old.reddit.com/search.json?q={query}&include_over_18=on).",
+    "v2.6 hotlink fix: pngtree/cloudfront downloads now send Referer automatically; the bot also retries the next result.",
     "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics.",
     "v2.5.2 THREE ENGINES: images = your slots + Bing boost · gifs = your gif slots · videos = YouTube (no slot needed, always on).",
     "v2.5.2 CLEANUP: temp files auto-delete (1h max age, 15-min sweep) and the bot pings /cleanup after every send — disk stays free.",
@@ -20,7 +21,7 @@
     {
       "slot": 1,
       "name": "Reddit NSFW (Amateur/Real)",
-      "url": "https://www.reddit.com/search?q={query}+nsfw",
+      "url": "https://old.reddit.com/search.json?q={query}+nsfw&include_over_18=on",
       "type": "image",
       "enabled": true
     },
@@ -41,14 +42,14 @@
     {
       "slot": 4,
       "name": "DarkNaija (Realistic Porn)",
-      "url": "https://www.darknaija.com/search/{query}",
+      "url": "https://www.darknaija.com/?s={query}",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 5,
       "name": "Pichunter (Realistic Porn)",
-      "url": "https://www.pichunter.com/gallery/{query}",
+      "url": "https://www.pichunter.com/search/{query}",
       "type": "image",
       "enabled": true
     },

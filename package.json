@@ -1,6 +1,6 @@
 {
   "name": "intelligent-scraper",
-  "version": "2.5.3",
+  "version": "2.6.0",
   "description": "intelligent-scraper 2.5 - MY-LINKS-FIRST search + gif channel, hot-reloaded my_links.json, per-slot diagnostics, hotlink-protected CDN downloads (UA + Referer fallback), BreadBot /music /video /download integration",
   "main": "server.js",
   "scripts": {

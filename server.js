@@ -135,6 +135,30 @@ async function tryMyLinks(query, type, extraLinks) {
     await Promise.all(slots.map(async (link) => {
         try {
             const url = myLinkUrl(link, query);
+            /* v2.6 JSON SLOTS: a slot pointing at a .json endpoint (e.g.
+             * old.reddit.com/search.json?q={query}) is PARSED as JSON —
+             * regex-on-HTML found nothing because JSON has no <img> tags.
+             * Works for reddit's public search API: include_over_18=on
+             * makes the NSFW subreddits answer. */
+            if (/\.json(\?|#|$)/i.test(url)) {
+                const r = await axios.get(url, {
+                    headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/2.6', 'Accept': 'application/json' },
+                    timeout: 15000 });
+                const children = r.data?.data?.children || [];
+                const urls = [];
+                for (const c of children){
+                    const d = c.data || {};
+                    const u = d.url_overridden_by_dest || '';
+                    if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(u)) urls.push(u);
+                    const pv = d.preview?.images?.[0]?.source?.url || '';
+                    if (pv) urls.push(pv.replace(/&amp;/g, '&'));
+                }
+                const clean = [...new Set(urls)].filter(u => !utils.isJunkImageUrl(u)).slice(0, 30);
+                diagRecord(String(link.url), clean.length, clean.length ? null : '0 media in JSON (query too niche for reddit?)');
+                if (clean.length) console.log(`MY LINKS (json): "${link.name || link.url}" → ${clean.length} ${type}(s)`);
+                found.push(...clean);
+                return;
+            }
             const html = await Promise.race([
                 utils.fetchPage(url),
                 new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
@@ -177,7 +201,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.5.3',
+        version: '2.6.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -213,7 +237,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.5.3',
+        version: '2.6.0',
         howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -260,7 +284,10 @@ app.post('/search', dataApi, async (req, res) => {
         }
         
         console.log(`Searching images for: "${searchQuery}" (site=${site}, nsfw=${!!nsfw})`);
-        const urls = await album.searchImages(searchQuery, site, { nsfw: nsfw === true, boostDomains: myLinkDomains('image') });
+        /* v2.6: per-engine diagnostics — the panel shows which engine
+         * delivered, so "0 from your slots" is visible instantly. */
+        const engineDiag = {};
+        const urls = await album.searchImages(searchQuery, site, { nsfw: nsfw === true, boostDomains: myLinkDomains('image'), diag: engineDiag });
 
         // MY LINKS: your sites (file + env + request) are tried FIRST
         const myUrls = await tryMyLinks(searchQuery, 'image', req.body?.myLinks);
@@ -276,7 +303,9 @@ app.post('/search', dataApi, async (req, res) => {
             count: allUrls.length,
             source: site,
             myLinks: myUrls.length,
-            myLinksFirst: myUrls.length > 0
+            myLinksFirst: myUrls.length > 0,
+            engines: engineDiag,      /* v2.6: {xbooru: n, realbooru: n, bing: n, …} */
+            version: '2.6.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -461,7 +490,8 @@ app.get('/gif', dataApi, async (req, res) => {
         }
         
         console.log(`Searching GIFs for: "${q}"`);
-        const gifUrls = await gif.search(q);
+        const gifDiag = {};   /* v2.6: per-source counts */
+        const gifUrls = await gif.search(q, gifDiag);
 
         // MY LINKS: your GIF sites first (hot-reloaded file + env)
         // v2.5.1: the bot can also forward ITS OWN MYLINKS env per request
@@ -477,7 +507,9 @@ app.get('/gif', dataApi, async (req, res) => {
             gifs: allGifs, 
             count: allGifs.length,
             myLinks: myGifs.length,
-            myLinksFirst: myGifs.length > 0
+            myLinksFirst: myGifs.length > 0,
+            engines: gifDiag,         /* v2.6: {tenor: n, giphy: n, reddit: n} */
+            version: '2.6.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);
