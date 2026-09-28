@@ -318,3 +318,31 @@ listing every resolver's failure (no crash, no hang).
   IP — clean error, no hang) ✅
 - On your Render deployment test `!music <song>` / `!dl <yt-url>` after deploy;
   if an instance dies, add fresh ones via the env overrides.
+
+## v2.8.0 — 2026-09-27 — REAL-QUERY PROOF: wrong files fixed, video rebuilt
+Live end-to-end verification with actual user-style queries on every media type.
+
+FIXED — WRONG FILES (the user complaint):
+1. GIF channel: tenor/giphy pages embed related+trending sections — "ebony" led with
+   ilove-mexican-food-mexican.gif, "blowjob" led with she-hulk.gif / bj-novak-thinking.gif.
+   utils.relevantGifs(): dedupe by media id (same gif used to appear 3x) + slug relevance
+   (on-topic slugs lead; off-topic only as filler). Applied in gif.js, tryMyLinks AND the
+   final merged /gif list.
+2. Images: booru posts get deleted after listing — images[0] could 404 ("big boobs").
+   utils.verifyLeadingImages(): probes the first 4-8 candidates in parallel with a ranged
+   GET + Referer and floats a VERIFIED-ALIVE image to the front.
+3. TBIB slot shipped 4KB thumbnails (HTML listing) — switched to DAPI XML (verified 118KB
+   full-res from the same post).
+4. /download 404 error message was misleading — bot-side now receives honest errors.
+
+VIDEO — REBUILT (was 100% dead):
+- Resolver chain was all dead from DC IPs (innertube 400, invidious 5/5 dead, cobalt 400).
+- media.js: cobalt instances upgraded to the v10 API (downloadMode replaces audioOnly —
+  the old field made every modern instance reject with error.api.invalid_body); alive
+  instances first (co.otomir23.me tunnel verified, api.piped.private.coffee search+streams).
+- NEW NSFW fallback chain with ACTUAL search (all verified live from this build):
+    xnxx     — search → page → signed xnxx-cdn mp4 (22-33MB verified)
+    xhamster  — search → page → xhcdn mp4 (32MB verified)
+    eporner   — public API v2 search (on-topic titles) → /dload mp4
+  Shared VIDEO_RECENT list: different query / consecutive sends NEVER repeat a clip.
+  Slug relevance filters sidebar junk (twerking queries used to return "youtuber-13854986").

@@ -184,11 +184,103 @@ function extractDapiFileUrls(text){
     return out;
 }
 
+/* ─── v2.8: LEAD-RESULT VERIFIER — never let the bot lead with a
+ * dead image ──────────────────────────────────────────────────────
+ * The bot downloads images[0]. Booru posts get DELETED after they
+ * show up in a listing, so the first URL can 404 while 100+ live
+ * images sit right behind it ("big boobs" hit exactly this:
+ * rule34 …/3128/… 404 on 2026-09-27). This probes the first few
+ * candidates in parallel with a 1KB ranged GET + proper Referer and
+ * floats the first ALIVE one to the front. Nothing is reordered
+ * when every probe fails (unknown CDNs stay untouched).          */
+function refererFor(url){
+    try { const h = new URL(url).hostname; return 'https://' + h + '/'; } catch (e) { return undefined; }
+}
+function probeAlive(url, timeoutMs = 5000){
+    return new Promise((resolve) => {
+        try {
+            const u = new URL(url);
+            const lib = u.protocol === 'http:' ? require('http') : require('https');
+            const rq = lib.request({
+                hostname: u.hostname, port: u.port || (u.protocol === 'http:' ? 80 : 443),
+                path: u.pathname + u.search, method: 'GET', timeout: timeoutMs,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.37',
+                    'Referer': refererFor(url),
+                    'Range': 'bytes=0-1023'
+                }
+            }, (res) => {
+                let n = 0;
+                res.on('data', (c) => { n += c.length; if (n > 2048) rq.destroy(); });
+                res.on('end', () => resolve(res.statusCode >= 200 && res.statusCode < 300 && n > 0));
+                res.on('error', () => resolve(false));
+            });
+            rq.on('timeout', () => { rq.destroy(); resolve(false); });
+            rq.on('error', () => resolve(false));
+            rq.end();
+        } catch (e) { resolve(false); }
+    });
+}
+async function verifyLeadingImages(urls, count = 4){
+    const list = (urls || []).filter(Boolean);
+    if (list.length < 2) return list;
+    /* v2.8: WALK batches until the first ALIVE url is found — my-links
+     * slots return PAIRS (rule34 .jpeg+.png of the same post), so one
+     * deleted post can eat the whole first batch. Probe 4 at a time,
+     * up to 8 candidates total, ~2s per batch. */
+    for (let start = 0; start < Math.min(8, list.length); start += count) {
+        const head = list.slice(start, start + count);
+        const verdicts = await Promise.all(head.map((u) => probeAlive(u)));
+        const idx = verdicts.indexOf(true);
+        if (idx !== -1) {
+            const winner = head[idx];
+            if (start === 0 && idx === 0) return list;   /* leader already alive */
+            return [winner, ...list.filter((u) => u !== winner)];
+        }
+    }
+    return list;   /* nothing verified — leave order untouched */
+}
+
+/* ─── v2.8: GIF RELEVANCE — kills the "wrong gif" class of failures ──
+ * Tenor/Giphy HTML pages embed EVERY media URL on the page: the real
+ * search results AND the related/trending/sticker sections. Live proof
+ * (2026-09-27): "ebony"  → ilove-mexican-food-mexican.gif led the list;
+ * "blowjob" → she-hulk.gif + bj-novak-thinking.gif led (fuzzy "bj").
+ * The same gif also appeared 3x in different size variants (ID suffix),
+ * wasting 2 of every 3 slots. This filter:
+ *   1. dedupes by media id (tenor ID prefix / giphy media id)
+ *   2. ranks by SLUG: tenor paths carry the gif's name — a gif whose
+ *      slug contains a query word leads; off-topic slugs only survive
+ *      when on-topic results are too few (<6).                        */
+function relevantGifs(urls, query){
+    const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const seen = new Set();
+    const onTopic = [], offTopic = [];
+    for (const raw of (urls || [])) {
+        const u = String(raw);
+        let id = null, slug = '';
+        const tm = u.match(/media\d*\.tenor\.com\/(?:m\/)?([A-Za-z0-9_-]+)\/([a-z0-9-]+)\.gif/i);
+        if (tm) { id = 't:' + tm[1].slice(0, 11); slug = tm[2].toLowerCase(); }
+        else {
+            const gm = u.match(/giphy\.com\/media\/(?:v1\.[A-Za-z0-9]+\/)?([A-Za-z0-9_-]+)(?:\/|\.)/i);
+            if (gm) id = 'g:' + gm[1];
+        }
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const topic = words.length > 0 && slug.length > 0 && words.some(w => slug.includes(w));
+        (topic ? onTopic : offTopic).push(u);
+    }
+    const keep = onTopic.length >= 6 ? onTopic : onTopic.concat(offTopic);
+    return keep.slice(0, 30);
+}
+
 module.exports = {
     fetchPage,
     downloadImage,
     extractImageUrls,
     isJunkImageUrl,
     booruFullUrls,
-    extractDapiFileUrls
+    extractDapiFileUrls,
+    verifyLeadingImages,
+    relevantGifs
 };

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const utils = require('./utils');
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -72,8 +73,12 @@ async function search(query, diag) {
         }
     }));
     const merged = [...new Set(all)];
-    console.log(`[GIF] "${query}" → ${merged.length} gif(s) total`);
-    return merged;
+    /* v2.8 SLUG RELEVANCE: tenor/giphy pages embed related + trending
+     * sections — the bot used to lead with a mexican-food gif for
+     * "ebony". Dedupe by media id and rank on-topic slugs first. */
+    const final = utils.relevantGifs(merged, query);
+    console.log(`[GIF] "${query}" → ${merged.length} raw → ${final.length} on-topic gif(s)`);
+    return final;
 }
 
 module.exports = { search };

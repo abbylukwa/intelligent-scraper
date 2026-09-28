@@ -1,12 +1,12 @@
 {
-  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.7 (HOT-RELOADED) — EVERY SLOT LIVE-VERIFIED 2026-09-27: dead links replaced (reddit 403, pornpics WAF, babehub 403, pichunter 403) with booru sites that answer datacenter IPs and ship FULL-RES originals ===",
+  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.8 (HOT-RELOADED) — EVERY SLOT LIVE-VERIFIED 2026-09-27; TBIB switched HTML->DAPI XML (thumbs were 4KB junk): dead links replaced (reddit 403, pornpics WAF, babehub 403, pichunter 403) with booru sites that answer datacenter IPs and ship FULL-RES originals ===",
   "_HOW_TO": [
     "PUT any website link in a slot's 'url'. Four kinds work:",
     "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
     "  2. Category page: https://www.cleanpng.com/free/christmas.html -> fetched AS-IS.",
     "  3. Template:     https://mysite.com/search?q={query} -> {query} is replaced by the search word.",
-    "  4. v2.7 DAPI XML: https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query} -> file_url full-res extracted.",
-    "v2.7 BOORU CONVERTER: realbooru + rule34.xxx thumbnails are auto-rewritten to FULL-RES originals (verified 148KB/194KB downloads).",
+    "  4. v2.8 DAPI XML: https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query} -> file_url full-res extracted.",
+    "v2.8 BOORU CONVERTER: realbooru + rule34.xxx thumbnails are auto-rewritten to FULL-RES originals (verified 148KB/194KB downloads).",
     "'type': 'image' or 'gif'. 'enabled': false switches a slot off without deleting it.",
     "v2.5 HOT-RELOAD: edit this file and the NEXT search already uses it — NO restart needed.",
     "v2.5 YOUR LINKS ARE TRIED FIRST and their results LEAD the list (the bot downloads images[0]).",
@@ -37,8 +37,8 @@
     },
     {
       "slot": 4,
-      "name": "TBIB (Big Image Board Fallback)",
-      "url": "https://tbib.org/index.php?page=post&s=list&tags={query}",
+      "name": "TBIB DAPI (Full-Res XML Direct)",
+      "url": "https://tbib.org/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
       "type": "image",
       "enabled": true
     },

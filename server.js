@@ -167,6 +167,11 @@ async function tryMyLinks(query, type, extraLinks) {
             if (type === 'gif') {
                 const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.gif/gi) || [];
                 urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
+                /* v2.8 SLUG RELEVANCE: tenor/giphy pages embed related +
+                 * trending sections — "ebony" used to lead with a
+                 * mexican-food meme gif. Dedupe by media id and rank
+                 * on-topic slugs first. */
+                urls = utils.relevantGifs(urls, query);
             } else {
                 urls = await utils.extractImageUrls(String(html), url);
                 /* v2.7 DAPI XML SLOTS: gelbooru-family dapi endpoints answer
@@ -214,7 +219,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.7.0',
+        version: '2.8.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -250,7 +255,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.7.0',
+        version: '2.8.0',
         howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -308,17 +313,23 @@ app.post('/search', dataApi, async (req, res) => {
         /* v2.5 ORDERING FIX: your links LEAD the array — the bot
          * downloads images[0], so engine results used to bury them. */
         const allUrls = [...new Set([...myUrls, ...urls])];
-        
+        /* v2.8 LEAD-RESULT VERIFIER: booru posts get deleted after
+         * listing — images[0] can 404 while 100+ live URLs sit behind
+         * it. Probe the first 4 in parallel and lead with a VERIFIED
+         * alive one (adds ~1-2s, only when the leader is dead). */
+        const verified = await utils.verifyLeadingImages(allUrls, 4);
+        if (verified[0] !== allUrls[0]) console.log(`[search] lead result was DEAD — promoted verified image to front`);
+
         res.json({ 
             success: true,
             query: searchQuery,
-            images: allUrls, 
+            images: verified, 
             count: allUrls.length,
             source: site,
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             engines: engineDiag,      /* v2.6: {xbooru: n, realbooru: n, bing: n, …} */
-            version: '2.7.0'
+            version: '2.8.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -512,7 +523,16 @@ app.get('/gif', dataApi, async (req, res) => {
             .split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
         const myGifs = await tryMyLinks(q, 'gif', extraGifLinks);
         /* v2.5: same ordering fix as /search — your GIFs lead */
-        const allGifs = [...new Set([...myGifs, ...gifUrls])];
+        let allGifs = [...new Set([...myGifs, ...gifUrls])];
+        /* v2.8 FINAL RELEVANCE PASS: your tenor slot can still contribute
+         * an off-topic gif scraped from the page's related section — this
+         * last pass floats on-topic slugs to the very front of the merged
+         * list, so the bot NEVER leads with a wrong gif. */
+        const relevant = utils.relevantGifs(allGifs, q);
+        if (relevant.length && relevant[0] !== allGifs[0]) {
+            console.log(`[gif] relevance pass reordered — on-topic gif promoted to front`);
+            allGifs = relevant;
+        }
         
         res.json({ 
             success: true,
@@ -522,7 +542,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             engines: gifDiag,         /* v2.6: {tenor: n, giphy: n, reddit: n} */
-            version: '2.7.0'
+            version: '2.8.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -576,18 +596,44 @@ app.post('/video', dataApi, async (req, res) => {
          * instead of the same top result over and over. */
         const excl = new Set((Array.isArray(exclude) ? exclude : []).map(x => String(x).toLowerCase().trim()).filter(Boolean));
         const found = await media.ytSearch(searchQuery, 10);
-        if (!found.length) return res.status(404).json({ error: 'No results', message: 'No YouTube results for "' + searchQuery + '"' });
+        /* v2.8: 0 search results no longer kills the request — falls
+         * through to the xhamster fallback at the bottom. */
         const fresh = found.filter(v => !excl.has(String(v.id).toLowerCase()) && !excl.has(String(v.title || '').toLowerCase().trim()));
         const vids = fresh.length ? fresh : found;   /* all already sent? fall back to full list */
         if (excl.size) console.log(`[video] ${found.length} found, ${fresh.length} after excluding ${excl.size} already-sent`);
         const baseUrl = req.protocol + '://' + req.get('host');
         let lastErr = null;
-        for (const v of vids) {
+        let ytTried = 0;
+        for (const v of vids.slice(0, 4)) {
             try {
+                ytTried++;
                 const out = await media.ytDownload(v.id, 'video', baseUrl);
                 console.log(`[video] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
                 return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, videoId: v.id, mimetype: out.mimetype || 'video/mp4', kind: 'video', sizeBytes: out.sizeBytes, results: found.slice(0, 5).map(x => ({ id: x.id, title: x.title })) });
             } catch (e) { lastErr = e; console.error('[video] attempt failed:', e.message); }
+        }
+        /* v2.8 NSFW VIDEO FALLBACK CHAIN — YouTube refuses NSFW-ish
+         * queries from datacenter IPs (search 404s or streams 200 with
+         * ZERO bytes — live-proof 2026-09-27). Three sites with ACTUAL
+         * search, all verified live from this build:
+         *   1. xnxx     — search → page → signed xnxx-cdn mp4 (22.1MB verified)
+         *   2. xhamster — search → page → xhcdn mp4 (32MB verified)
+         *   3. eporner  — public API search → /dload mp4 (dload host is
+         *                 network-dependent; ships last, skips on failure)
+         * A shared VIDEO_RECENT list in media.js guarantees a DIFFERENT
+         * clip for different queries / consecutive sends. */
+        const FALLBACKS = [
+            ['xnxx', media.xnxxVideo],
+            ['xhamster', media.xhVideo],
+            ['eporner', media.epornerVideo],
+        ];
+        for (const [name, fn] of FALLBACKS) {
+            try {
+                console.log(`[video] YouTube failed after ${ytTried} attempt(s) — trying ${name} for "${searchQuery}"`);
+                const out = await fn(searchQuery, baseUrl);
+                console.log(`[video] ${name} OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
+                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: name, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes });
+            } catch (e) { lastErr = lastErr || e; console.error(`[video] ${name} fallback failed:`, e.message); }
         }
         throw lastErr || new Error('All download attempts failed');
     } catch (e) {
