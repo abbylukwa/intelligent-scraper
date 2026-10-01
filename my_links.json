@@ -14,7 +14,28 @@
     "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics."
   ],
   "links": [
-   {
+    {
+      "slot": 1,
+      "name": "Realbooru (Real People, Full-Res)",
+      "url": "https://realbooru.com/index.php?page=post&s=list&tags={query}",
+      "type": "image",
+      "enabled": true
+    },
+    {
+      "slot": 2,
+      "name": "Xbooru DAPI (Full-Res XML Direct)",
+      "url": "https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
+      "type": "image",
+      "enabled": true
+    },
+    {
+      "slot": 3,
+      "name": "Rule34.xxx (Biggest Archive, Full-Res)",
+      "url": "https://rule34.xxx/index.php?page=post&s=list&tags={query}",
+      "type": "image",
+      "enabled": true
+    },
+    {
       "slot": 4,
       "name": "TBIB DAPI (Full-Res XML Direct)",
       "url": "https://tbib.org/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
@@ -35,5 +56,12 @@
       "type": "gif",
       "enabled": true
     },
+    {
+      "slot": 7,
+      "name": "Giphy Adult (Polished Loops)",
+      "url": "https://giphy.com/search/{query}+porn",
+      "type": "gif",
+      "enabled": true
+    }
   ]
 }
