@@ -5,42 +5,63 @@ const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 };
 
-// ─── Primary: Tenor (no key needed) ───────────────────────
-async function searchTenor(query) {
-    const url = `https://tenor.com/search/${encodeURIComponent(query)}-gifs`;
+// ─── MyLinks GIF sources (prioritized) ───────────────────
+async function searchMyLinksGifs(query, myLinks) {
+    const gifs = [];
+    if (!myLinks || !Array.isArray(myLinks)) return gifs;
+    for (const link of myLinks) {
+        if (link.type !== 'gif' || !link.enabled) continue;
+        try {
+            const url = link.url.includes('{query}') 
+                ? link.url.replace('{query}', encodeURIComponent(query))
+                : link.url;
+            const html = await utils.fetchPage(url);
+            const found = utils.extractImageUrls(html, url)
+                .filter(u => /\.(gif|gifv|mp4|webm)$/i.test(u));
+            if (found.length > 0) {
+                gifs.push(...found.slice(0, 5));
+            }
+        } catch (e) {
+            console.error(`[GIF] MyLinks "${link.name}" error:`, e.message);
+        }
+    }
+    return gifs;
+}
+
+// ─── PornHub GIF scraper (custom) ────────────────────────
+async function searchPornHubGifs(query) {
+    const url = `https://www.pornhub.com/gifs/search?search=${encodeURIComponent(query)}`;
     try {
         const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
         const html = response.data;
-        // Tenor embeds .gif URLs in the page
-        const matches = html.match(/https:\/\/media\.tenor\.com\/[^"']+\.gif/g) || [];
+        const matches = html.match(/https:\/\/[^"']*\.pornhub[^"']*\.(gif|mp4|webm)/gi) || [];
         const unique = [...new Set(matches)];
         if (unique.length > 0) return unique.slice(0, 10);
     } catch (e) {
-        console.error('Tenor error:', e.message);
+        console.error('[GIF] PornHub error:', e.message);
     }
     return [];
 }
 
-// ─── Fallback: GIPHY public search page ──────────────────
-async function searchGiphyScrape(query) {
-    const url = `https://giphy.com/search/${encodeURIComponent(query)}`;
+// ─── DarkNaija GIF/video scraper ─────────────────────────
+async function searchDarkNaijaGifs(query) {
+    const url = `https://darknaija.com/?s=${encodeURIComponent(query)}`;
     try {
         const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
         const html = response.data;
-        const matches = html.match(/https:\/\/media\d*\.giphy\.com\/media\/[^"']+\.gif/g) || [];
-        const unique = [...new Set(matches)];
-        if (unique.length > 0) return unique.slice(0, 10);
+        const gifs = utils.extractImageUrls(html, url)
+            .filter(u => /\.(gif|gifv|mp4|webm)$/i.test(u));
+        if (gifs.length > 0) return gifs.slice(0, 10);
     } catch (e) {
-        console.error('GIPHY scrape error:', e.message);
+        console.error('[GIF] DarkNaija error:', e.message);
     }
     return [];
 }
 
-// ─── Fallback: Reddit GIF search ─────────────────────────
+// ─── Fallback: Reddit GIF search (NSFW only) ─────────────
 async function searchRedditGifs(query, nsfw) {
-    /* v2.8.2: nsfw requests add include_over_18=on so results are
-     * actually adult instead of default-mixed. */
-    const url = `https://old.reddit.com/search.json?q=${encodeURIComponent(query)}+gif&limit=10${nsfw ? '&include_over_18=on' : ''}`;
+    if (!nsfw) return []; // Skip on SFW queries
+    const url = `https://old.reddit.com/search.json?q=${encodeURIComponent(query)}+gif&limit=10&include_over_18=on`;
     try {
         const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
         const posts = response.data?.data?.children || [];
@@ -49,42 +70,62 @@ async function searchRedditGifs(query, nsfw) {
             .filter(url => /\.(gif|gifv)$/i.test(url));
         if (gifs.length > 0) return gifs.slice(0, 10);
     } catch (e) {
-        console.error('Reddit GIF error:', e.message);
+        console.error('[GIF] Reddit error:', e.message);
     }
     return [];
 }
 
-// ─── Main search — try all sources ────────────────────────
+// ─── Main search — priority to custom sources ────────────
 async function search(query, diag, opts = {}) {
     const nsfw = !!(opts && opts.nsfw);
+    const myLinks = opts.myLinks || [];
     console.log(`[GIF] Searching "${query}"${nsfw ? ' (nsfw)' : ''}`);
-    /* v2.6 MERGE-ALL: the old first-hit return meant one weak source
-     * (tenor HTML → 1 gif) starved the others. All sources now run and
-     * merge, deduped — the bot still downloads the first that works. */
-    /* v2.8.2 NO-SFW-FALLBACK ON NSFW: Tenor and Giphy BAN adult content —
-     * for an explicit NSFW gif request they can only return memes/clean
-     * loops (the "wrong files" class). When the caller flags the query
-     * NSFW, the general SFW gif engines are SKIPPED entirely — reddit
-     * (unfiltered, +over18) stays, and the caller's my_links adult gif
-     * slots still lead the list. */
-    const sources = nsfw ? [searchRedditGifs] : [searchTenor, searchGiphyScrape, searchRedditGifs];
-    const names = nsfw ? ['reddit'] : ['tenor', 'giphy', 'reddit'];
+    
     const all = [];
-    await Promise.all(sources.map(async (fn, i) => {
+
+    // 1. Try MyLinks GIF slots FIRST (prioritized)
+    if (myLinks.length > 0) {
         try {
-            const r = await fn(query, nsfw);
-            const clean = (r || []).filter(Boolean);
-            if (diag) diag[names[i]] = clean.length;
-            all.push(...clean);
+            const myGifs = await searchMyLinksGifs(query, myLinks);
+            if (diag) diag['mylinks_gifs'] = myGifs.length;
+            all.push(...myGifs);
         } catch (e) {
-            if (diag) diag[names[i]] = 0;
-            console.error(`[GIF] ${fn.name} failed:`, e.message);
+            if (diag) diag['mylinks_gifs'] = 0;
+            console.error('[GIF] MyLinks batch failed:', e.message);
         }
-    }));
+    }
+
+    // 2. Custom sources (always run on NSFW)
+    if (nsfw) {
+        const customSources = [
+            { fn: searchPornHubGifs, name: 'pornhub' },
+            { fn: searchDarkNaijaGifs, name: 'darknaija' }
+        ];
+        
+        await Promise.all(customSources.map(async (src) => {
+            try {
+                const r = await src.fn(query);
+                const clean = (r || []).filter(Boolean);
+                if (diag) diag[src.name] = clean.length;
+                all.push(...clean);
+            } catch (e) {
+                if (diag) diag[src.name] = 0;
+                console.error(`[GIF] ${src.name} failed:`, e.message);
+            }
+        }));
+
+        // 3. Reddit fallback (NSFW only)
+        try {
+            const redditGifs = await searchRedditGifs(query, nsfw);
+            if (diag) diag['reddit'] = redditGifs.length;
+            all.push(...redditGifs);
+        } catch (e) {
+            if (diag) diag['reddit'] = 0;
+            console.error('[GIF] Reddit fallback failed:', e.message);
+        }
+    }
+
     const merged = [...new Set(all)];
-    /* v2.8 SLUG RELEVANCE: tenor/giphy pages embed related + trending
-     * sections — the bot used to lead with a mexican-food gif for
-     * "ebony". Dedupe by media id and rank on-topic slugs first. */
     const final = utils.relevantGifs(merged, query);
     console.log(`[GIF] "${query}" → ${merged.length} raw → ${final.length} on-topic gif(s)`);
     return final;
