@@ -1,61 +1,89 @@
 {
-  "_README": "=== YOUR IMAGE/GIF/VIDEO LINKS (my_links.json) — v2.8.3 (HOT-RELOADED) — FILTERED TO PRIORITY SOURCES ONLY ===",
+  "_README": "=== YOUR IMAGE/GIF/VIDEO LINKS (my_links.json) — v2.8.4 (HOT-RELOADED) — PREMIUM HD ADULT SITES ONLY ===",
   "_HOW_TO": [
     "PUT any website link in a slot's 'url'. Four kinds work:",
-    "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
-    "  2. Category page: https://www.cleanpng.com/free/christmas.html -> fetched AS-IS.",
-    "  3. Template:     https://mysite.com/search?q={query} -> {query} is replaced by the search word.",
-    "  4. v2.8 DAPI XML: https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query} -> file_url full-res extracted.",
-    "v2.8 BOORU CONVERTER: realbooru + rule34.xxx thumbnails are auto-rewritten to FULL-RES originals (verified 148KB/194KB downloads).",
+    "  1. Bare domain:  https://example.com  -> page fetched directly",
+    "  2. Category page: https://example.com/category/nude  -> fetched AS-IS.",
+    "  3. Template:     https://example.com/search?q={query} -> {query} is replaced by the search word.",
+    "  4. DAPI XML:     https://api.example.com/posts?tags={query} -> file_url full-res extracted.",
+    "",
     "'type': 'image', 'gif', or 'video'. 'enabled': false switches a slot off without deleting it.",
     "v2.5 HOT-RELOAD: edit this file and the NEXT search already uses it — NO restart needed.",
     "v2.5 YOUR LINKS ARE TRIED FIRST and their results LEAD the list (the bot downloads images[0]).",
     "CHECK /my-links in a browser — per-slot diagnostics: lastResult {count, error, ts}.",
     "A dead slot never breaks a search — it is skipped, logged, and shown in the diagnostics.",
-    "v2.8.3: MzansiFun REMOVED. Priority sources only: PornPics, DarkNaija (images, GIFs, videos)."
+    "v2.8.4: Premium HD sites only. Booru/generic sources removed. All slots user-defined or disabled."
   ],
   "links": [
     {
       "slot": 1,
-      "name": "PornPics (Images)",
+      "name": "PornPics (HD Images)",
       "url": "https://www.pornpics.com/",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 2,
-      "name": "DarkNaija (Images)",
+      "name": "DarkNaija (HD Images)",
       "url": "https://www.darknaija.com/",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 3,
-      "name": "PornHub GIFs",
+      "name": "xvideos (HD Images)",
+      "url": "https://www.xvideos.com/",
+      "type": "image",
+      "enabled": false
+    },
+    {
+      "slot": 4,
+      "name": "PornHub GIFs (HD)",
       "url": "https://www.pornhub.com/gifs",
       "type": "gif",
       "enabled": true
     },
     {
-      "slot": 4,
-      "name": "DarkNaija Nude Pictures",
+      "slot": 5,
+      "name": "DarkNaija Nude Pictures (HD)",
       "url": "https://darknaija.com/category/nude-pictures/",
       "type": "gif",
       "enabled": true
     },
     {
-      "slot": 5,
-      "name": "DarkNaija Leak Videos",
+      "slot": 6,
+      "name": "xvideos GIFs (HD)",
+      "url": "https://www.xvideos.com/",
+      "type": "gif",
+      "enabled": false
+    },
+    {
+      "slot": 7,
+      "name": "DarkNaija Leak Videos (HD)",
       "url": "https://darknaija.com/category/leak-videos/",
       "type": "video",
       "enabled": true
     },
     {
-      "slot": 6,
-      "name": "PornPics Videos",
+      "slot": 8,
+      "name": "PornPics Videos (HD)",
       "url": "https://www.pornpics.com/videos/",
       "type": "video",
       "enabled": true
+    },
+    {
+      "slot": 9,
+      "name": "xvideos Videos (HD) — Template",
+      "url": "https://www.xvideos.com/search/{query}",
+      "type": "video",
+      "enabled": false
+    },
+    {
+      "slot": 10,
+      "name": "User Custom Slot — Edit me",
+      "url": "https://example.com/search?q={query}",
+      "type": "image",
+      "enabled": false
     }
   ]
 }
