@@ -37,8 +37,10 @@ async function searchGiphyScrape(query) {
 }
 
 // ─── Fallback: Reddit GIF search ─────────────────────────
-async function searchRedditGifs(query) {
-    const url = `https://old.reddit.com/search.json?q=${encodeURIComponent(query)}+gif&limit=10`;
+async function searchRedditGifs(query, nsfw) {
+    /* v2.8.2: nsfw requests add include_over_18=on so results are
+     * actually adult instead of default-mixed. */
+    const url = `https://old.reddit.com/search.json?q=${encodeURIComponent(query)}+gif&limit=10${nsfw ? '&include_over_18=on' : ''}`;
     try {
         const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
         const posts = response.data?.data?.children || [];
@@ -53,17 +55,24 @@ async function searchRedditGifs(query) {
 }
 
 // ─── Main search — try all sources ────────────────────────
-async function search(query, diag) {
-    console.log(`[GIF] Searching "${query}"`);
+async function search(query, diag, opts = {}) {
+    const nsfw = !!(opts && opts.nsfw);
+    console.log(`[GIF] Searching "${query}"${nsfw ? ' (nsfw)' : ''}`);
     /* v2.6 MERGE-ALL: the old first-hit return meant one weak source
      * (tenor HTML → 1 gif) starved the others. All sources now run and
      * merge, deduped — the bot still downloads the first that works. */
-    const sources = [searchTenor, searchGiphyScrape, searchRedditGifs];
+    /* v2.8.2 NO-SFW-FALLBACK ON NSFW: Tenor and Giphy BAN adult content —
+     * for an explicit NSFW gif request they can only return memes/clean
+     * loops (the "wrong files" class). When the caller flags the query
+     * NSFW, the general SFW gif engines are SKIPPED entirely — reddit
+     * (unfiltered, +over18) stays, and the caller's my_links adult gif
+     * slots still lead the list. */
+    const sources = nsfw ? [searchRedditGifs] : [searchTenor, searchGiphyScrape, searchRedditGifs];
+    const names = nsfw ? ['reddit'] : ['tenor', 'giphy', 'reddit'];
     const all = [];
-    const names = ['tenor', 'giphy', 'reddit'];
     await Promise.all(sources.map(async (fn, i) => {
         try {
-            const r = await fn(query);
+            const r = await fn(query, nsfw);
             const clean = (r || []).filter(Boolean);
             if (diag) diag[names[i]] = clean.length;
             all.push(...clean);

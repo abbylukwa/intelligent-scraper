@@ -1,3 +1,22 @@
+# Intelligent Scraper — CHANGES
+
+## v2.8.2 — NSFW-ONLY VIDEO: every non-NSFW download fallback removed
+
+WHY: owner request — "remove all the non-nsfw fallback on the downloads".
+
+1. /video no longer touches YouTube AT ALL. The old flow tried
+   ytSearch + ytDownload up to 4 times (20-90s of dead latency from
+   datacenter IPs — search 404s / 200-empty) before reaching the NSFW
+   chain. Now /video goes STRAIGHT to the verified NSFW chain:
+   xnxx → xhamster → eporner.
+2. The bot's exclude list (already-sent TITLES) is now honoured by
+   EVERY NSFW source (xnxx slugs, xhamster slugs, eporner titles) —
+   before it only filtered YouTube results, so multi-video runs could
+   still repeat. makeTitleExcluder() + slugTitleOf() in media.js.
+3. /music keeps YouTube as its only source (songs are not NSFW
+   content) and /download still resolves whatever URL you give it —
+   those are explicit requests, not fallbacks.
+
 # intelligent-scraper
 
 ## v2.7.0 (feature, 2026-09-27) — LINK AUDIT: every slot live-verified + 2 engine bugs fixed

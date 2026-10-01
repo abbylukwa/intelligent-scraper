@@ -396,6 +396,24 @@ async function genericDownload(url, kind, baseUrl) {
  * queries return DIFFERENT clips ("different query different video") */
 const VIDEO_RECENT = [];
 
+/* v2.8.2: honour the bot's exclude list (already-sent TITLES) in every
+ * NSFW source — a candidate whose title contains an excluded title is
+ * a repeat and gets skipped. */
+function makeTitleExcluder(exclude) {
+    const excl = (Array.isArray(exclude) ? exclude : [])
+        .map(x => String(x).toLowerCase().trim()).filter(Boolean);
+    return (title) => {
+        const t = String(title || '').toLowerCase();
+        if (!t || !excl.length) return false;
+        return excl.some(x => t.includes(x));
+    };
+}
+function slugTitleOf(url) {
+    const m = String(url).match(/\/videos\/[^/]*?([a-z0-9-]+)-?\d+(?:\/|$)/i) ||
+              String(url).match(/\/video-[a-z0-9]+\/([^"'\/]+)/i);
+    return decodeURIComponent((m && m[1]) || '').replace(/[-_]+/g, ' ').trim();
+}
+
 /* slug-vs-query relevance: prefer pages whose URL carries query words */
 function videoSlugScore(url, words) {
     const slug = String(url).toLowerCase();
@@ -407,8 +425,9 @@ function videoSlugScore(url, words) {
  * search xnxx.com/search/{q} → /video-{id}/{slug} paths → page embeds
  * signed mp4-cdn*.xnxx-cdn.com URLs → VERIFIED download: 200, 22.1MB
  * video/mp4. On-topic slugs come straight from the search results.  */
-async function xnxxVideo(query, baseUrl) {
+async function xnxxVideo(query, baseUrl, exclude) {
     const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const titleExcluded = makeTitleExcluder(exclude);
     const s = await axios.get('https://www.xnxx.com/search/' + encodeURIComponent(String(query).trim().replace(/\s+/g, '+')) + '/',
         { timeout: 20000, headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } });
     const paths = [...new Set((String(s.data).match(/\/video-[a-z0-9]+\/[^"'\s<>]+/gi) || []))];
@@ -430,6 +449,7 @@ async function xnxxVideo(query, baseUrl) {
             });
             const slugTitle = decodeURIComponent((vp.match(/\/video-[a-z0-9]+\/([^"'/]+)/i) || [])[1] || 'video')
                 .replace(/_/g, ' ').trim();
+            if (titleExcluded(slugTitle)) continue;   /* v2.8.2: bot exclude list */
             for (const cu of cands.slice(0, 3)) {
                 try {
                     const buf = await fetchCapped(cu);
@@ -449,13 +469,14 @@ async function xnxxVideo(query, baseUrl) {
  * gvideo.eporner.com 403s datacenter IPs; the dload host resolved
  * unreachable from the build sandbox — works from some networks, so
  * it ships LAST in the chain: if it can't download it just skips.  */
-async function epornerVideo(query, baseUrl) {
+async function epornerVideo(query, baseUrl, exclude) {
     const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const titleExcluded = makeTitleExcluder(exclude);
     const r = await axios.get('https://www.eporner.com/api/v2/video/search/?query=' + encodeURIComponent(query) +
         '&per_page=10&thumbsize=big&order=latest&gay=0&lq=1&format=json',
         { timeout: 20000, headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } });
     const vids = (r.data && r.data.videos) || [];
-    const fresh = vids.filter(v => v && v.id && !VIDEO_RECENT.includes('ep:' + v.id));
+    const fresh = vids.filter(v => v && v.id && !VIDEO_RECENT.includes('ep:' + v.id) && !titleExcluded(v.title));
     if (!fresh.length) throw new Error('eporner: 0 fresh results for "' + query + '"');
     for (const v of fresh.slice(0, 3)) {
         try {
@@ -474,12 +495,13 @@ async function epornerVideo(query, baseUrl) {
     throw new Error('eporner: no downloadable mp4 for "' + query + '"');
 }
 
-async function xhVideo(query, baseUrl) {
+async function xhVideo(query, baseUrl, exclude) {
     const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const titleExcluded = makeTitleExcluder(exclude);
     const s = await axios.get('https://www.xhamster.com/search?keyword=' + encodeURIComponent(query),
         { timeout: 20000, headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' } });
     const pages = [...new Set(String(s.data).match(/https?:\/\/[^"'\s<>\\]*xhamster\.com\/videos\/[^"'\s<>\\]*?-\d+/g) || [])]
-        .filter(u => !VIDEO_RECENT.includes(u));
+        .filter(u => !VIDEO_RECENT.includes(u) && !titleExcluded(slugTitleOf(u)));
     if (!pages.length) throw new Error('xhamster: 0 fresh video pages for "' + query + '"');
     /* v2.8.1 SLUG RELEVANCE: search pages embed sidebar/related junk —
      * live proof: "twerking" queries returned a sidebar clip called

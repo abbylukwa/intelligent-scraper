@@ -219,7 +219,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.8.0',
+        version: '2.8.2',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
@@ -255,7 +255,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.8.0',
+        version: '2.8.2',
         howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -329,7 +329,7 @@ app.post('/search', dataApi, async (req, res) => {
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             engines: engineDiag,      /* v2.6: {xbooru: n, realbooru: n, bing: n, …} */
-            version: '2.8.0'
+            version: '2.8.2'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -514,8 +514,11 @@ app.get('/gif', dataApi, async (req, res) => {
         }
         
         console.log(`Searching GIFs for: "${q}"`);
+        /* v2.8.2: NSFW gif requests skip the SFW-only engines (tenor/
+         * giphy) — the bot sends nsfw=1 (or site=nsfw) for them. */
+        const nsfw = req.query.nsfw === '1' || req.query.site === 'nsfw';
         const gifDiag = {};   /* v2.6: per-source counts */
-        const gifUrls = await gif.search(q, gifDiag);
+        const gifUrls = await gif.search(q, gifDiag, { nsfw });
 
         // MY LINKS: your GIF sites first (hot-reloaded file + env)
         // v2.5.1: the bot can also forward ITS OWN MYLINKS env per request
@@ -542,7 +545,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             engines: gifDiag,         /* v2.6: {tenor: n, giphy: n, reddit: n} */
-            version: '2.8.0'
+            version: '2.8.2'
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -590,50 +593,33 @@ app.post('/video', dataApi, async (req, res) => {
         if (!searchQuery || String(searchQuery).trim() === '') {
             return res.status(400).json({ error: 'Query parameter is required', example: { "query": "funny video" } });
         }
-        console.log(`[video] Searching YouTube for: "${searchQuery}"`);
-        /* v2.5.2 EXCLUDE: the bot passes already-sent video ids/titles so a
-         * "send 6 videos of horse racing" run drops SIX DIFFERENT clips
-         * instead of the same top result over and over. */
-        const excl = new Set((Array.isArray(exclude) ? exclude : []).map(x => String(x).toLowerCase().trim()).filter(Boolean));
-        const found = await media.ytSearch(searchQuery, 10);
-        /* v2.8: 0 search results no longer kills the request — falls
-         * through to the xhamster fallback at the bottom. */
-        const fresh = found.filter(v => !excl.has(String(v.id).toLowerCase()) && !excl.has(String(v.title || '').toLowerCase().trim()));
-        const vids = fresh.length ? fresh : found;   /* all already sent? fall back to full list */
-        if (excl.size) console.log(`[video] ${found.length} found, ${fresh.length} after excluding ${excl.size} already-sent`);
-        const baseUrl = req.protocol + '://' + req.get('host');
-        let lastErr = null;
-        let ytTried = 0;
-        for (const v of vids.slice(0, 4)) {
-            try {
-                ytTried++;
-                const out = await media.ytDownload(v.id, 'video', baseUrl);
-                console.log(`[video] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
-                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, videoId: v.id, mimetype: out.mimetype || 'video/mp4', kind: 'video', sizeBytes: out.sizeBytes, results: found.slice(0, 5).map(x => ({ id: x.id, title: x.title })) });
-            } catch (e) { lastErr = e; console.error('[video] attempt failed:', e.message); }
-        }
-        /* v2.8 NSFW VIDEO FALLBACK CHAIN — YouTube refuses NSFW-ish
-         * queries from datacenter IPs (search 404s or streams 200 with
-         * ZERO bytes — live-proof 2026-09-27). Three sites with ACTUAL
-         * search, all verified live from this build:
-         *   1. xnxx     — search → page → signed xnxx-cdn mp4 (22.1MB verified)
-         *   2. xhamster — search → page → xhcdn mp4 (32MB verified)
+        /* v2.8.2 NSFW-ONLY VIDEO — the YouTube attempt block (ytSearch +
+         * ytDownload, up to 4 dead datacenter attempts, 20-90s of latency
+         * before the real chain) is REMOVED per owner request: "remove all
+         * the non-nsfw fallback on the downloads". Every video now comes
+         * straight from the verified NSFW chain:
+         *   1. xnxx     — signed xnxx-cdn mp4 (22.1MB verified)
+         *   2. xhamster — xhcdn mp4 (32MB verified)
          *   3. eporner  — public API search → /dload mp4 (dload host is
          *                 network-dependent; ships last, skips on failure)
-         * A shared VIDEO_RECENT list in media.js guarantees a DIFFERENT
-         * clip for different queries / consecutive sends. */
+         * The bot's exclude list (already-sent TITLES) is honoured by
+         * EVERY source, so multi-video runs never repeat a clip. */
+        const excl = (Array.isArray(exclude) ? exclude : []).map(x => String(x).toLowerCase().trim()).filter(Boolean);
+        if (excl.length) console.log(`[video] exclude list: ${excl.length} already-sent title(s)`);
+        const baseUrl = req.protocol + '://' + req.get('host');
         const FALLBACKS = [
             ['xnxx', media.xnxxVideo],
             ['xhamster', media.xhVideo],
             ['eporner', media.epornerVideo],
         ];
+        let lastErr = null;
         for (const [name, fn] of FALLBACKS) {
             try {
-                console.log(`[video] YouTube failed after ${ytTried} attempt(s) — trying ${name} for "${searchQuery}"`);
-                const out = await fn(searchQuery, baseUrl);
+                console.log(`[video] trying ${name} for "${searchQuery}"`);
+                const out = await fn(searchQuery, baseUrl, excl);
                 console.log(`[video] ${name} OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
                 return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: name, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes });
-            } catch (e) { lastErr = lastErr || e; console.error(`[video] ${name} fallback failed:`, e.message); }
+            } catch (e) { lastErr = lastErr || e; console.error(`[video] ${name} failed:`, e.message); }
         }
         throw lastErr || new Error('All download attempts failed');
     } catch (e) {
@@ -724,15 +710,9 @@ app.use((err, req, res, next) => {
     });
 });
 
-/* v2.5: periodic temp hygiene on long runs — /temp self-clears every
- * 30 min (files older than the temp TTL go first) so a busy bot never
- * fills the Render disk. */
-setInterval(function(){
-    try {
-        const r = temp.cleanup();
-        if (r && r.deletedCount) console.log('[cleanup] removed ' + r.deletedCount + ' old temp file(s), freed ' + (r.freedSpaceMB || 0) + 'MB');
-    } catch (e) { console.error('[cleanup] failed:', e.message); }
-}, 30 * 60 * 1000).unref();
+/* v2.5: periodic temp hygiene on long runs — v2.8.1: this used to be a
+ * SECOND sweep interval (30 min) running alongside the v2.5.2 15-min
+ * sweep above — same job twice. Removed; the 15-min sweep above owns it. */
 
 // Start server
 app.listen(PORT, () => {

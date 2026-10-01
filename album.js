@@ -232,12 +232,16 @@ async function searchImages(query, site = 'auto', opts = {}) {
     engines.push({ n: 'xbooru',    f: () => xbooruImages(q) });
     engines.push({ n: 'realbooru', f: () => realbooruImages(q) });
     engines.push({ n: 'reddit',   f: () => redditQueryImages(q) });
-    /* 3 — general engines */
-    if (site === 'auto' || site === 'bing')     engines.push({ n: 'bing', f: () => bingImages(q) });
-    if (site === 'auto' || site === 'flickr')   engines.push({ n: 'flickr', f: () => flickrImages(q) });
-    if (site === 'auto' || site === 'commons')  engines.push({ n: 'commons', f: () => commonsImages(q) });
-    if (site === 'auto' || site === 'wikipedia')engines.push({ n: 'wikipedia', f: () => wikipediaImages(q) });
-    if (site === 'auto' || site === 'openclipart') engines.push({ n: 'openclipart', f: () => openclipartImages(q) });
+    /* 3 — general engines (SFW) — v2.8.2: NEVER for NSFW queries. Bing/
+     * Flickr/Commons/Wikipedia/Openclipart are non-NSFW sources; an
+     * explicit NSFW request must never fall back to them, even when a
+     * caller passes site='auto' together with nsfw=true. */
+    const generalOk = (site === 'auto') && !nsfw;
+    if (generalOk || site === 'bing')     engines.push({ n: 'bing', f: () => bingImages(q) });
+    if (generalOk || site === 'flickr')   engines.push({ n: 'flickr', f: () => flickrImages(q) });
+    if (generalOk || site === 'commons')  engines.push({ n: 'commons', f: () => commonsImages(q) });
+    if (generalOk || site === 'wikipedia')engines.push({ n: 'wikipedia', f: () => wikipediaImages(q) });
+    if (generalOk || site === 'openclipart') engines.push({ n: 'openclipart', f: () => openclipartImages(q) });
     /* 4 — legacy NSFW chain (pornpics needs JS on their site — best effort) */
     if (nsfw){
         engines.push({ n: 'pornpics', f: async () => {
@@ -245,8 +249,9 @@ async function searchImages(query, site = 'auto', opts = {}) {
             return extractPornPicsImages(html, LEGACY.pornpics.url);
         }});
     }
-    /* 5 — legacy SFW blog sites as last-ditch attempts */
-    if (site === 'auto' || site === 'darknaija' || site === 'imagefaqs'){
+    /* 5 — legacy SFW blog sites as last-ditch attempts (v2.8.2: not for
+     * NSFW queries — darknaija/imagefaqs are celebrity/clean blogs) */
+    if ((site === 'auto' && !nsfw) || site === 'darknaija' || site === 'imagefaqs'){
         for (const key of ['darknaija', 'imagefaqs']){
             if (site !== 'auto' && site !== key) continue;
             engines.push({ n: key, f: async () => {
