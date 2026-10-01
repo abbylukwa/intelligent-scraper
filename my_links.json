@@ -1,5 +1,5 @@
 {
-  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.8 (HOT-RELOADED) — EVERY SLOT LIVE-VERIFIED 2026-09-27; TBIB switched HTML->DAPI XML (thumbs were 4KB junk): dead links replaced (reddit 403, pornpics WAF, babehub 403, pichunter 403) with booru sites that answer datacenter IPs and ship FULL-RES originals ===",
+  "_README": "=== YOUR IMAGE/GIF LINKS (my_links.json) — v2.8 (HOT-RELOADED) — EVERY SLOT LIVE-VERIFIED 2026-09-27; TBIB switched HTML->DAPI XML (thumbs were 4KB junk): dead links replaced (reddit[...]",
   "_HOW_TO": [
     "PUT any website link in a slot's 'url'. Four kinds work:",
     "  1. Bare domain:  https://pngtree.com  -> page fetched directly AND boosted via Bing 'your-query site:pngtree.com'",
@@ -16,50 +16,50 @@
   "links": [
     {
       "slot": 1,
-      "name": "Realbooru (Real People, Full-Res)",
-      "url": "https://realbooru.com/index.php?page=post&s=list&tags={query}",
+      "name": "PornPics (Images)",
+      "url": "https://www.pornpics.com/",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 2,
-      "name": "Xbooru DAPI (Full-Res XML Direct)",
-      "url": "https://xbooru.com/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
+      "name": "DarkNaija (Images)",
+      "url": "https://www.darknaija.com/",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 3,
-      "name": "Rule34.xxx (Biggest Archive, Full-Res)",
-      "url": "https://rule34.xxx/index.php?page=post&s=list&tags={query}",
+      "name": "MzansiFun (Images)",
+      "url": "https://www.mzansifun.com/",
       "type": "image",
       "enabled": true
     },
     {
       "slot": 4,
-      "name": "TBIB DAPI (Full-Res XML Direct)",
-      "url": "https://tbib.org/index.php?page=dapi&s=post&q=index&tags={query}&limit=30",
-      "type": "image",
+      "name": "PornHub GIFs",
+      "url": "https://www.pornhub.com/gifs",
+      "type": "gif",
       "enabled": true
     },
     {
       "slot": 5,
-      "name": "DarkNaija (Real-Porn Blog Fallback)",
-      "url": "https://www.darknaija.com/?s={query}",
-      "type": "image",
+      "name": "DarkNaija Nude Pictures",
+      "url": "https://darknaija.com/category/nude-pictures/",
+      "type": "gif",
       "enabled": true
     },
     {
       "slot": 6,
-      "name": "Tenor Porn GIFs (The Loop King)",
-      "url": "https://tenor.com/search/{query}-porn-gifs",
+      "name": "DarkNaija Leak Videos",
+      "url": "https://darknaija.com/category/leak-videos/",
       "type": "gif",
       "enabled": true
     },
     {
       "slot": 7,
-      "name": "Giphy Adult (Polished Loops)",
-      "url": "https://giphy.com/search/{query}+porn",
+      "name": "PornPics Videos",
+      "url": "https://www.pornpics.com/videos/",
       "type": "gif",
       "enabled": true
     }
