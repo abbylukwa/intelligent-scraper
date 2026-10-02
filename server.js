@@ -5,7 +5,6 @@ const cors = require('cors');
 const path = require('path');
 
 const album = require('./album');
-const gif = require('./gif');
 const temp = require('./temp');
 const media = require('./media');
 
@@ -13,32 +12,23 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // ═══════════════════════════════════════════════════════════════
-// MY LINKS — 7 easy-to-replace slots (edit my_links.json)
-// Put YOUR own website links in my_links.json — the 7 dummy ones in
-// there are placeholders. Nothing else in this file needs to change.
-// Built-in sites (darknaija, pornpics, reddit, imagefaqs, tenor,
-// giphy ...) were NOT touched.
+// v3.0 MYLINKS-ONLY — ZERO BUILT-IN SOURCES
+// Every endpoint is driven EXCLUSIVELY by the slots the owner
+// configures. There are NO hardcoded websites, NO fallback
+// engines and NO emergency chains anywhere in this codebase.
+//   1. my_links.json (HOT-RELOADED — edit the file, the very next
+//      search uses it. NO restart needed.)
+//   2. MYLINKS env var — "url1, url2" (set on this service OR on
+//      the bot — the bot forwards its own MYLINKS with every search)
+//   3. per-request: POST /search {"myLinks": ["https://..."]}
+// Slot types: 'image' | 'gif' | 'video' | 'music'.
+// Empty config = honest "no sources configured" answers.
 // ═══════════════════════════════════════════════════════════════
 const fs = require('fs');
+const axios = require('axios');
 const utils = require('./utils');
 const MY_LINKS_FILE = path.join(__dirname, 'my_links.json');
 
-/* ═══════════════════════════════════════════════════════════════
- * v2.5 MY LINKS — three ways to add YOUR sites, all merged:
- *   1. my_links.json (HOT-RELOADED — edit the file, the very next
- *      search uses it. NO restart needed anymore.)
- *   2. MYLINKS env var — "url1, url2, url3" (set in Render env,
- *      no file editing at all)
- *   3. per-request: POST /search {"myLinks": ["https://..."]}
- *      — the whatsapp bot forwards its own MYLINKS env
- *        automatically with EVERY search.
- *
- * v2.5 ORDERING FIX: your links are tried FIRST and their results
- * are placed FIRST in the returned array — the bot downloads
- * images[0], so previously engine results buried your own sites.
- * A dead/JS-walled slot never breaks a search — it is skipped,
- * logged, and recorded in the /my-links diagnostics.
- * ═══════════════════════════════════════════════════════════ */
 let MY_LINKS = [];
 let MY_LINKS_MTIME = -1;
 function loadMyLinks(force){
@@ -72,21 +62,18 @@ function diagRecord(key, count, error){
     MY_LINK_DIAG.set(key, { ts: new Date().toISOString(), count: count || 0, error: error || null });
 }
 
-function getMyLinks(type, extraLinks){
+function getMyLinks(type, extraLinks, extraType){
     loadMyLinks(false);
     let slots = MY_LINKS.map(l => Object.assign({ source: 'file' }, l)).concat(MY_LINKS_ENV);
     if (Array.isArray(extraLinks) && extraLinks.length){
+        const t = extraType || type;
         const reqSlots = extraLinks.map((l, i) => {
             if (typeof l === 'string')
-                return { url: l, type: /\.gif(\?|$)/i.test(l) ? 'gif' : 'image', name: 'bot-link-' + (i + 1), source: 'request' };
-            return (l && l.url) ? Object.assign({ source: 'request' }, l) : null;
+                return { url: l, type: t, name: 'bot-link-' + (i + 1), source: 'request' };
+            return (l && l.url) ? Object.assign({ source: 'request', type: t }, l) : null;
         }).filter(Boolean);
         slots = reqSlots.concat(slots);          /* per-request links lead */
     }
-    /* v2.5.3 DEDUPE: the bot now HARD-CODES the same 7 sites as
-     * my_links.json and forwards them with every search — without this
-     * filter every URL was fetched TWICE per search (request + file).
-     * First occurrence wins: request links lead, then file, then env. */
     const seenUrls = new Set();
     return slots
         .filter(l => (l.enabled !== false) && String(l.type || 'image') === type)
@@ -94,14 +81,9 @@ function getMyLinks(type, extraLinks){
 }
 
 // Build the real URL to fetch for a custom link + search word.
-// v2.4 FIX — why pngtree.com downloaded the logo:
-//   • a link WITH a path (https://pngtree.com/free-animals-png/fish) is a
-//     pinned CATEGORY page → fetched AS-IS (its own path already says
-//     what to grab — appending ?s= turned it back into the homepage)
-//   • a bare domain (https://pngtree.com) is useless with ?s= on modern
-//     JS sites → the domain is ALSO searched via Bing "query site:domain"
-//     in /search (boostDomains), which finds the site's real images
-//   • {query} templates work exactly as before
+//   • a link WITH a path is a pinned CATEGORY page → fetched AS-IS
+//   • a bare domain gets ?s=<query> appended
+//   • {query} templates are replaced
 function myLinkUrl(link, query) {
     const q = encodeURIComponent(query || '');
     const u = String(link.url || '');
@@ -115,18 +97,45 @@ function myLinkUrl(link, query) {
     return u + (u.includes('?') ? '&' : '?') + 's=' + q;
 }
 
-/* v2.4: unique hostnames from your enabled image links — used to boost
- * searches with Bing site: so your sites return REAL content images. */
-function myLinkDomains(type){
-    const out = new Set();
-    for (const l of getMyLinks(type)){
-        try { out.add(new URL(l.url).hostname.replace(/^www\./, '')); } catch (e) {}
+const NO_SOURCES_HINT = 'No sources configured. Add your links: my_links.json (hot-reloaded, no restart) / MYLINKS env var ("url1, url2") / per-request myLinks parameter. Slot types: image, gif, video, music.';
+
+/* v3.1: video slots must follow FILE order (owner pins the priority —
+ * YonaYethuu first) even when the bot forwards the same URLs as env /
+ * per-request slots (those would otherwise lead and break the order).
+ * Slots that exist in the file sort by their file position; request-
+ * only slots append after them in arrival order. */
+function sortSlotsByFileOrder(slots, type){
+    loadMyLinks(false);
+    const fileOrder = new Map();
+    MY_LINKS.forEach((l, i) => { if (String(l.type || 'image') === type) fileOrder.set(String(l.url), i); });
+    return slots
+        .map((s, i) => ({ s, rank: fileOrder.has(String(s.url)) ? fileOrder.get(String(s.url)) : 1000 + i }))
+        .sort((a, b) => a.rank - b.rank)
+        .map(x => x.s);
+}
+
+/* v3.1: pick one video slot by name piece, slot number or url piece.
+ * "yona" / "pornpics" work as substrings; a PURE-NUMBER pick ("2")
+ * matches the file slot number OR the /video-sites list position —
+ * never a URL substring (IPs/ports would false-match). Returns
+ * { slots, available } — available = the enabled choices for errors. */
+function filterVideoSlots(slots, site){
+    const available = slots.map(s => ({ slot: s.slot, name: s.name || s.url, url: s.url }));
+    if (!site) return { slots, available };
+    const pick = String(site).trim().toLowerCase();
+    if (!pick) return { slots, available };
+    if (/^\d+$/.test(pick)) {
+        const num = parseInt(pick, 10);
+        return { slots: slots.filter((s, i) => Number(s.slot) === num || (i + 1) === num), available };
     }
-    return [...out];
+    const matched = slots.filter(s =>
+        String(s.name || '').toLowerCase().includes(pick) ||
+        String(s.url || '').toLowerCase().includes(pick));
+    return { slots: matched, available };
 }
 
 // Try every enabled custom link of `type`; returns an array of direct
-// media URLs found. A dead/dummy link NEVER breaks a search — each slot
+// media URLs found. A dead link NEVER breaks a search — each slot
 // fails independently, is skipped and logged.
 async function tryMyLinks(query, type, extraLinks) {
     const slots = getMyLinks(type, extraLinks);
@@ -135,14 +144,12 @@ async function tryMyLinks(query, type, extraLinks) {
     await Promise.all(slots.map(async (link) => {
         try {
             const url = myLinkUrl(link, query);
-            /* v2.6 JSON SLOTS: a slot pointing at a .json endpoint (e.g.
-             * old.reddit.com/search.json?q={query}) is PARSED as JSON —
-             * regex-on-HTML found nothing because JSON has no <img> tags.
-             * Works for reddit's public search API: include_over_18=on
-             * makes the NSFW subreddits answer. */
+            /* JSON SLOTS: a slot pointing at a .json API endpoint is
+             * PARSED as JSON — regex-on-HTML finds nothing because JSON
+             * has no <img> tags. Standard search.json result shape. */
             if (/\.json(\?|#|$)/i.test(url)) {
                 const r = await axios.get(url, {
-                    headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/2.7', 'Accept': 'application/json' },
+                    headers: { 'User-Agent': 'mozilla/5.0 breadbot-scraper/3.0', 'Accept': 'application/json' },
                     timeout: 15000 });
                 const children = r.data?.data?.children || [];
                 const urls = [];
@@ -154,7 +161,7 @@ async function tryMyLinks(query, type, extraLinks) {
                     if (pv) urls.push(pv.replace(/&amp;/g, '&'));
                 }
                 const clean = [...new Set(urls)].filter(u => !utils.isJunkImageUrl(u)).slice(0, 30);
-                diagRecord(String(link.url), clean.length, clean.length ? null : '0 media in JSON (query too niche for reddit?)');
+                diagRecord(String(link.url), clean.length, clean.length ? null : '0 media in JSON');
                 if (clean.length) console.log(`MY LINKS (json): "${link.name || link.url}" → ${clean.length} ${type}(s)`);
                 found.push(...clean);
                 return;
@@ -165,33 +172,31 @@ async function tryMyLinks(query, type, extraLinks) {
             ]);
             let urls = [];
             if (type === 'gif') {
-                const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.gif/gi) || [];
+                /* v3.1: gif slots also extract .mp4/.webm loops — blog
+                 * "gif" posts embed mp4 players, not .gif files. The bot
+                 * sends both as video, so nothing breaks downstream. */
+                const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.(?:gif|mp4|webm)(?:\?[^\s"'<>\\]*)?/gi) || [];
                 urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
-                /* v2.8 SLUG RELEVANCE: tenor/giphy pages embed related +
-                 * trending sections — "ebony" used to lead with a
-                 * mexican-food meme gif. Dedupe by media id and rank
-                 * on-topic slugs first. */
+                /* dedupe + rank on-topic slugs first (generic, no site logic) */
                 urls = utils.relevantGifs(urls, query);
+            } else if (type === 'video' || type === 'music') {
+                /* list-only mode (used by /search-video & /search-music):
+                 * direct media links straight off the page, no download */
+                const re = type === 'video'
+                    ? /https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm)[^\s"'<>\\]*/gi
+                    : /https?:\/\/[^\s"'<>\\]+\.(?:mp3|m4a|ogg|wav|aac)(?:\?[^\s"'<>\\]*)?/gi;
+                urls = [...new Set((String(html).match(re) || []).map(u => u.replace(/&amp;/g, '&')))];
             } else {
                 urls = await utils.extractImageUrls(String(html), url);
-                /* v2.7 DAPI XML SLOTS: gelbooru-family dapi endpoints answer
-                 * static XML with full-res originals in file_url="…" — no
-                 * <img> tags, cheerio finds nothing. VERIFIED: xbooru dapi
-                 * "ebony ass" → 20 attrs → direct img.xbooru.com downloads. */
+                /* DAPI XML SLOTS: gelbooru-family dapi endpoints answer
+                 * static XML with full-res originals in file_url="…" —
+                 * no <img> tags, cheerio finds nothing. */
                 if (!urls.length) urls = utils.extractDapiFileUrls(String(html));
-                /* v2.7 BOORU CONVERTER: browse pages only expose small
-                 * /thumbnails/ links — rewrite them to the full originals.
-                 * VERIFIED live: realbooru 148KB, rule34.xxx 194KB. When a
-                 * conversion exists the thumbs are DROPPED (they are 3-6KB
-                 * junk-gate bait). */
-                const fulls = [];
-                for (const u of urls) fulls.push(...utils.booruFullUrls(u));
-                if (fulls.length) urls = fulls;
             }
             urls = [...new Set(urls)].slice(0, 30);
-            diagRecord(String(link.url), urls.length, urls.length ? null : '0 media in static HTML (JS-walled? the Bing site: boost still covers this domain)');
+            diagRecord(String(link.url), urls.length, urls.length ? null : '0 media in static HTML (JS-walled?)');
             if (urls.length) console.log(`MY LINKS: "${link.name || link.url}" → ${urls.length} ${type}(s)`);
-            else console.log(`MY LINKS: "${link.name || link.url}" → no ${type}s found (page may need JS — Bing site: boost still covers this domain)`);
+            else console.log(`MY LINKS: "${link.name || link.url}" → no ${type}s found (page may need JS)`);
             found.push(...urls);
         } catch (e) {
             diagRecord(String(link.url), 0, e.message);
@@ -215,26 +220,27 @@ app.use('/temp', express.static(temp.TEMP_DIR));
 
 // Health check endpoints
 app.get('/status', (req, res) => {
+    loadMyLinks(false);   /* keep the counts fresh (mtime hot-reload) */
     const stats = temp.getStats();
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '2.8.2',
+        version: '4.0.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
-        // FIX: getStats() already returns totalSizeMB as a string (toFixed applied
-        // inside temp.js) — calling .toFixed() on it again threw TypeError, so
-        // /status always returned 500 and the bot's !scraperstatus always said DOWN.
         tempSizeMB: Number(stats.totalSizeMB) || 0,
+        maxDownloadMB: media.MAX_MB,
+        builtInSources: 0,
         endpoints: [
             '/search',
-            '/search-video', 
+            '/search-video',
             '/search-music',
             '/search-lyrics',
             '/album',
             '/gif',
             '/music',
             '/video',
+            '/video-sites',
             '/download',
             '/cleanup',
             '/my-links'
@@ -244,7 +250,8 @@ app.get('/status', (req, res) => {
             enabled: MY_LINKS.filter(l => l.enabled !== false).length,
             envSlots: MY_LINKS_ENV.length,
             hotReload: true,
-            triedFirst: true
+            triedFirst: true,
+            types: ['image', 'gif', 'video', 'music']
         }
     });
 });
@@ -255,8 +262,8 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '2.8.2',
-        howTo: 'THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Your links are tried FIRST and their results lead the list (the bot downloads images[0]). Type "image" or "gif", {query} template optional, enabled:false switches a slot off.',
+        version: '4.0.0',
+        howTo: 'MYLINKS-ONLY (zero built-in sites). THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Types: image, gif, video, music. {query} template optional, enabled:false switches a slot off. A dead slot never breaks a search.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
         envSlots: MY_LINKS_ENV.map(l => l.url),
@@ -266,18 +273,16 @@ app.get('/my-links', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ 
-        ok: true, 
+    res.json({
+        ok: true,
         timestamp: new Date().toISOString(),
         service: 'intelligent-scraper'
     });
 });
 
 // ─── Optional token auth ──────────────────────────────────────
-// INTEGRATION FIX: whatsapp-qr-app sends `Authorization: Bearer <SCRAPER_TOKEN>`
-// when SCRAPER_TOKEN is set in its env. The scraper ignored it. Now: if
-// SCRAPER_TOKEN is set here, data endpoints require the same token. If not set,
-// everything stays open exactly as before (zero behavior change).
+// If SCRAPER_TOKEN is set here, data endpoints require the same token.
+// If not set, everything stays open exactly as before.
 const dataApi = express.Router();
 dataApi.use((req, res, next) => {
     const token = process.env.SCRAPER_TOKEN;
@@ -287,151 +292,180 @@ dataApi.use((req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized — send Authorization: Bearer <SCRAPER_TOKEN>' });
 });
 
-// Search images — v2.4 multi-engine (Bing / Flickr / Wikimedia / Wikipedia /
-// Openclipart + your my_links domains boosted via site: operator)
+// Search images — v3.0: EXCLUSIVELY from your MyLinks slots
 app.post('/search', dataApi, async (req, res) => {
     try {
-        const { query, q, site = 'auto', nsfw = false } = req.body;
+        const { query, q, site = 'auto' } = req.body;
         const searchQuery = query || q;
-        
+
         if (!searchQuery || searchQuery.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Query parameter is required',
                 example: { "query": "nature" }
             });
         }
-        
-        console.log(`Searching images for: "${searchQuery}" (site=${site}, nsfw=${!!nsfw})`);
-        /* v2.6: per-engine diagnostics — the panel shows which engine
-         * delivered, so "0 from your slots" is visible instantly. */
-        const engineDiag = {};
-        const urls = await album.searchImages(searchQuery, site, { nsfw: nsfw === true, boostDomains: myLinkDomains('image'), diag: engineDiag });
 
-        // MY LINKS: your sites (file + env + request) are tried FIRST
+        console.log(`Searching images for: "${searchQuery}" (site=${site})`);
+
+        // MY LINKS: your sites (file + env + request) are the ONLY source
         const myUrls = await tryMyLinks(searchQuery, 'image', req.body?.myLinks);
         if (myUrls.length) console.log(`[search] ${myUrls.length} image(s) from MY LINKS — placed FIRST`);
-        /* v2.5 ORDERING FIX: your links LEAD the array — the bot
-         * downloads images[0], so engine results used to bury them. */
-        const allUrls = [...new Set([...myUrls, ...urls])];
-        /* v2.8 LEAD-RESULT VERIFIER: booru posts get deleted after
-         * listing — images[0] can 404 while 100+ live URLs sit behind
-         * it. Probe the first 4 in parallel and lead with a VERIFIED
-         * alive one (adds ~1-2s, only when the leader is dead). */
-        const verified = await utils.verifyLeadingImages(allUrls, 4);
+
+        const allUrls = [...new Set(myUrls)];
+        /* LEAD-RESULT VERIFIER: probe the first candidates and lead with
+         * a VERIFIED alive one (adds ~1-2s, only when the leader is dead). */
+        const verified = allUrls.length ? await utils.verifyLeadingImages(allUrls, 4) : allUrls;
         if (verified[0] !== allUrls[0]) console.log(`[search] lead result was DEAD — promoted verified image to front`);
 
-        res.json({ 
+        res.json({
             success: true,
             query: searchQuery,
-            images: verified, 
-            count: allUrls.length,
+            images: verified,
+            count: verified.length,
             source: site,
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
-            engines: engineDiag,      /* v2.6: {xbooru: n, realbooru: n, bing: n, …} */
-            version: '2.8.2'
+            hint: myUrls.length ? undefined : NO_SOURCES_HINT,
+            version: '4.0.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to search images',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// Search videos
+// Search videos — v3.1: direct video links scraped from YOUR slots.
+// Optional "site" picks ONE video site (name piece / slot number).
 app.post('/search-video', dataApi, async (req, res) => {
     try {
-        const { query, q } = req.body;
+        const { query, q, site } = req.body;
         const searchQuery = query || q;
-        
+
         if (!searchQuery || searchQuery.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Query parameter is required',
                 example: { "query": "music video" }
             });
         }
-        
-        console.log(`Searching videos for: "${searchQuery}"`);
-        const videos = await album.searchVideos(searchQuery);
-        
-        res.json({ 
+
+        console.log(`Searching videos for: "${searchQuery}"${site ? ' (site=' + site + ')' : ''}`);
+        const extraLinks = Array.isArray(req.body?.myLinks) ? req.body.myLinks
+            : (req.body?.myLinks ? [req.body.myLinks] : []);
+        let slots = sortSlotsByFileOrder(getMyLinks('video', extraLinks, 'video'), 'video');
+        const picked = filterVideoSlots(slots, site);
+        if (site && !picked.slots.length) {
+            return res.status(404).json({
+                error: 'site "' + site + '" not found',
+                available: picked.available,
+                hint: 'Send one of the available names, or a slot number.',
+                version: '4.0.0'
+            });
+        }
+        slots = picked.slots;
+        const found = [];
+        await Promise.all(slots.map(async (link) => {
+            try {
+                const url = myLinkUrl(link, searchQuery);
+                const html = await Promise.race([
+                    utils.fetchPage(url),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+                ]);
+                const re = /https?:\/\/[^"'\s<>\\]+\.(?:mp4|webm)(?:\?[^"\s'<>\\]*)?/gi;
+                const urls = [...new Set((String(html).match(re) || []).map(u => u.replace(/&amp;/g, '&')))]
+                    .filter(u => !utils.isJunkImageUrl(u));
+                diagRecord(String(link.url), urls.length, urls.length ? null : '0 video links in static HTML');
+                found.push(...urls);
+            } catch (e) {
+                diagRecord(String(link.url), 0, e.message);
+            }
+        }));
+        const videos = [...new Set(found)].slice(0, 30);
+
+        res.json({
             success: true,
             query: searchQuery,
-            videos: videos, 
+            videos: videos,
             count: videos.length,
-            sources: ['pornhub', 'xhamster', 'spankyou']
+            myLinks: videos.length,
+            site: site || undefined,
+            hint: videos.length ? undefined : NO_SOURCES_HINT,
+            version: '4.0.0'
         });
     } catch (e) {
         console.error('Video search error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to search videos',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// Search music
+// Search music — v3.0: direct audio links scraped from YOUR slots
 app.post('/search-music', dataApi, async (req, res) => {
     try {
         const { query, q } = req.body;
         const searchQuery = query || q;
-        
+
         if (!searchQuery || searchQuery.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Query parameter is required',
                 example: { "query": "pop song" }
             });
         }
-        
+
         console.log(`Searching music for: "${searchQuery}"`);
-        const music = await album.searchMusic(searchQuery);
-        
-        res.json({ 
+        const extraLinks = Array.isArray(req.body?.myLinks) ? req.body.myLinks
+            : (req.body?.myLinks ? [req.body.myLinks] : []);
+        const music = await tryMyLinks(searchQuery, 'music', extraLinks);
+
+        res.json({
             success: true,
             query: searchQuery,
-            music: music, 
+            music: music,
             count: music.length,
-            sources: ['y2mate', 'mp3juices', 'pagalworld']
+            myLinks: music.length,
+            hint: music.length ? undefined : NO_SOURCES_HINT,
+            version: '4.0.0'
         });
     } catch (e) {
         console.error('Music search error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to search music',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// Search lyrics
+// Search lyrics — v3.0: no built-in sources; kept for compatibility
 app.post('/search-lyrics', dataApi, async (req, res) => {
     try {
         const { query, q } = req.body;
         const searchQuery = query || q;
-        
+
         if (!searchQuery || searchQuery.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Query parameter is required',
                 example: { "query": "Bohemian Rhapsody" }
             });
         }
-        
+
         console.log(`Searching lyrics for: "${searchQuery}"`);
-        const lyrics = await album.searchLyrics(searchQuery);
-        
-        res.json({ 
+        res.json({
             success: true,
             query: searchQuery,
-            lyrics: lyrics, 
-            count: lyrics.length,
-            note: 'These are links to lyric pages. You may need to scrape each page to get actual lyrics.'
+            lyrics: [],
+            count: 0,
+            hint: NO_SOURCES_HINT,
+            version: '4.0.0'
         });
     } catch (e) {
         console.error('Lyrics search error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to search lyrics',
-            message: e.message 
+            message: e.message
         });
     }
 });
@@ -440,18 +474,18 @@ app.post('/search-lyrics', dataApi, async (req, res) => {
 app.post('/album', dataApi, async (req, res) => {
     try {
         const { url } = req.body;
-        
+
         if (!url || url.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'URL parameter is required',
                 example: { "url": "https://example.com/album" }
             });
         }
-        
+
         console.log(`Downloading album from: ${url}`);
         const albumId = await album.downloadAlbum(url);
-        
-        res.json({ 
+
+        res.json({
             success: true,
             albumId: albumId,
             message: 'Album downloaded successfully',
@@ -459,9 +493,9 @@ app.post('/album', dataApi, async (req, res) => {
         });
     } catch (e) {
         console.error('Album download error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to download album',
-            message: e.message 
+            message: e.message
         });
     }
 });
@@ -471,18 +505,18 @@ app.get('/album/:albumId/next', async (req, res) => {
     try {
         const { albumId } = req.params;
         const image = temp.getNextImage(albumId);
-        
+
         if (!image) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: 'No more images or album not found',
                 albumId: albumId
             });
         }
-        
+
         // Use actual hostname for URL generation
         const host = req.get('host') || 'localhost:10000';
         const imageUrl = `http://${host}/temp/${path.basename(image.path)}`;
-        
+
         res.json({
             success: true,
             albumId: albumId,
@@ -494,70 +528,63 @@ app.get('/album/:albumId/next', async (req, res) => {
         });
     } catch (e) {
         console.error('Get next image error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to get next image',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// GIF search
+// GIF search — v3.0: EXCLUSIVELY from your gif-type MyLinks slots
 app.get('/gif', dataApi, async (req, res) => {
     try {
         const { q } = req.query;
-        
+
         if (!q || q.trim() === '') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Query parameter q is required',
                 example: '/gif?q=funny+cat'
             });
         }
-        
-        console.log(`Searching GIFs for: "${q}"`);
-        /* v2.8.2: NSFW gif requests skip the SFW-only engines (tenor/
-         * giphy) — the bot sends nsfw=1 (or site=nsfw) for them. */
-        const nsfw = req.query.nsfw === '1' || req.query.site === 'nsfw';
-        const gifDiag = {};   /* v2.6: per-source counts */
-        const gifUrls = await gif.search(q, gifDiag, { nsfw });
 
-        // MY LINKS: your GIF sites first (hot-reloaded file + env)
-        // v2.5.1: the bot can also forward ITS OWN MYLINKS env per request
+        console.log(`Searching GIFs for: "${q}"`);
+
+        // MY LINKS: your GIF sites (hot-reloaded file + env + request)
         const extraGifLinks = String(req.query.myLinks || '')
             .split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
         const myGifs = await tryMyLinks(q, 'gif', extraGifLinks);
-        /* v2.5: same ordering fix as /search — your GIFs lead */
-        let allGifs = [...new Set([...myGifs, ...gifUrls])];
-        /* v2.8 FINAL RELEVANCE PASS: your tenor slot can still contribute
-         * an off-topic gif scraped from the page's related section — this
-         * last pass floats on-topic slugs to the very front of the merged
-         * list, so the bot NEVER leads with a wrong gif. */
+
+        let allGifs = [...new Set(myGifs)];
+        /* FINAL RELEVANCE PASS: floats on-topic slugs to the very front */
         const relevant = utils.relevantGifs(allGifs, q);
         if (relevant.length && relevant[0] !== allGifs[0]) {
             console.log(`[gif] relevance pass reordered — on-topic gif promoted to front`);
             allGifs = relevant;
         }
-        
-        res.json({ 
+
+        res.json({
             success: true,
             query: q,
-            gifs: allGifs, 
+            gifs: allGifs,
             count: allGifs.length,
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
-            engines: gifDiag,         /* v2.6: {tenor: n, giphy: n, reddit: n} */
-            version: '2.8.2'
+            hint: myGifs.length ? undefined : NO_SOURCES_HINT,
+            version: '4.0.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to search GIFs',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// ─── POST /music — BreadBot integration (scraperMusic) ──────
+// ─── POST /music — BreadBot integration ─────────────────────
 // Bot: POST /music {query} -> expects { mediaUrl, title, mimetype, sizeBytes }
+// v3.0: driven EXCLUSIVELY by your music-type slots (my_links.json /
+// MYLINKS env / per-request myLinks). No slots = honest 404 + hint.
 app.post('/music', dataApi, async (req, res) => {
     try {
         const { query, q } = req.body || {};
@@ -565,71 +592,87 @@ app.post('/music', dataApi, async (req, res) => {
         if (!searchQuery || String(searchQuery).trim() === '') {
             return res.status(400).json({ error: 'Query parameter is required', example: { "query": "Winky D" } });
         }
-        console.log(`[music] Searching YouTube for: "${searchQuery}"`);
-        const vids = await media.ytSearch(searchQuery, 5);
-        if (!vids.length) return res.status(404).json({ error: 'No results', message: 'No YouTube results for "' + searchQuery + '"' });
-        const baseUrl = req.protocol + '://' + req.get('host');
-        let lastErr = null;
-        for (const v of vids) {
-            try {
-                const out = await media.ytDownload(v.id, 'audio', baseUrl);
-                console.log(`[music] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
-                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, mimetype: out.mimetype, kind: 'audio', sizeBytes: out.sizeBytes });
-            } catch (e) { lastErr = e; console.error('[music] attempt failed:', e.message); }
+        const slots = getMyLinks('music', Array.isArray(req.body?.myLinks) ? req.body.myLinks
+            : (req.body?.myLinks ? [req.body.myLinks] : []), 'music')
+            .map(l => ({ name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
+        if (!slots.length) {
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.0.0' });
         }
-        throw lastErr || new Error('All download attempts failed');
+        console.log(`[music] ${slots.length} music slot(s) for: "${searchQuery}"`);
+        const baseUrl = req.protocol + '://' + req.get('host');
+        const out = await media.myLinksMusic(slots, searchQuery, baseUrl, {
+            exclude: req.body?.exclude
+        });
+        console.log(`[music] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
+        return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, mimetype: out.mimetype, kind: 'audio', sizeBytes: out.sizeBytes });
     } catch (e) {
         console.error('Music error:', e);
-        res.status(500).json({ error: 'Failed to fetch music', message: e.message });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.0.0' });
     }
 });
 
-// ─── POST /video — BreadBot integration (scraperVideo) ───────
+// ─── POST /video — BreadBot integration ──────────────────────
 // Bot: POST /video {query} -> expects { mediaUrl, title, mimetype, sizeBytes }
+// v3.1: driven EXCLUSIVELY by your video-type slots, tried in FILE
+// order (YonaYethuu first). A slot's search page is scraped for direct
+// .mp4/.webm links and for video-page links (each page opened, its mp4
+// candidates pulled, quality-ranked). The winner is downloaded under
+// the SCRAPER_MAX_MB cap (default 40MB — 34MB videos download fine)
+// and served from /temp. The bot's exclude list (already-sent TITLES)
+// is honoured. Optional "site" (name piece / slot number) forces ONE
+// site — unknown picks return 404 + the available list.
 app.post('/video', dataApi, async (req, res) => {
     try {
-        const { query, q, exclude } = req.body || {};
+        const { query, q, exclude, site } = req.body || {};
         const searchQuery = query || q;
         if (!searchQuery || String(searchQuery).trim() === '') {
             return res.status(400).json({ error: 'Query parameter is required', example: { "query": "funny video" } });
         }
-        /* v2.8.2 NSFW-ONLY VIDEO — the YouTube attempt block (ytSearch +
-         * ytDownload, up to 4 dead datacenter attempts, 20-90s of latency
-         * before the real chain) is REMOVED per owner request: "remove all
-         * the non-nsfw fallback on the downloads". Every video now comes
-         * straight from the verified NSFW chain:
-         *   1. xnxx     — signed xnxx-cdn mp4 (22.1MB verified)
-         *   2. xhamster — xhcdn mp4 (32MB verified)
-         *   3. eporner  — public API search → /dload mp4 (dload host is
-         *                 network-dependent; ships last, skips on failure)
-         * The bot's exclude list (already-sent TITLES) is honoured by
-         * EVERY source, so multi-video runs never repeat a clip. */
         const excl = (Array.isArray(exclude) ? exclude : []).map(x => String(x).toLowerCase().trim()).filter(Boolean);
         if (excl.length) console.log(`[video] exclude list: ${excl.length} already-sent title(s)`);
-        const baseUrl = req.protocol + '://' + req.get('host');
-        const FALLBACKS = [
-            ['xnxx', media.xnxxVideo],
-            ['xhamster', media.xhVideo],
-            ['eporner', media.epornerVideo],
-        ];
-        let lastErr = null;
-        for (const [name, fn] of FALLBACKS) {
-            try {
-                console.log(`[video] trying ${name} for "${searchQuery}"`);
-                const out = await fn(searchQuery, baseUrl, excl);
-                console.log(`[video] ${name} OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
-                return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: name, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes });
-            } catch (e) { lastErr = lastErr || e; console.error(`[video] ${name} failed:`, e.message); }
+        let slots = sortSlotsByFileOrder(getMyLinks('video', Array.isArray(req.body?.myLinks) ? req.body.myLinks
+            : (req.body?.myLinks ? [req.body.myLinks] : []), 'video'), 'video');
+        const picked = filterVideoSlots(slots, site);
+        if (site && !picked.slots.length) {
+            console.log(`[video] site "${site}" not found — ${picked.available.length} available`);
+            return res.status(404).json({
+                error: 'site "' + site + '" not found',
+                available: picked.available,
+                hint: 'Send one of the available names, or a slot number. !vidsites lists them.',
+                version: '4.0.0'
+            });
         }
-        throw lastErr || new Error('All download attempts failed');
+        slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
+        if (!slots.length) {
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.0.0' });
+        }
+        console.log(`[video] ${slots.length} video slot(s) for: "${searchQuery}"${site ? ' (site=' + site + ')' : ''} — order: ${slots.map(s => s.name).join(' → ')}`);
+        const baseUrl = req.protocol + '://' + req.get('host');
+        const out = await media.myLinksVideo(slots, searchQuery, baseUrl, { exclude: excl });
+        console.log(`[video] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
+        return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: out.source, site: site || undefined, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes });
     } catch (e) {
         console.error('Video error:', e);
-        res.status(500).json({ error: 'Failed to fetch video', message: e.message });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.0.0' });
     }
 });
 
-// ─── POST /download — BreadBot integration (scraperDownloadMedia) ───
+// ─── GET /video-sites — the list users can pick from ───────────
+// Powers the bot's !vidsites command: numbered, enabled-first.
+app.get('/video-sites', dataApi, (req, res) => {
+    loadMyLinks(false);
+    const slots = sortSlotsByFileOrder(getMyLinks('video', [], 'video'), 'video');
+    res.json({
+        success: true,
+        defaultFirst: slots.length ? slots[0].name : null,
+        sites: slots.map((s, i) => ({ pick: i + 1, slot: s.slot, name: s.name || s.url, url: s.url })),
+        version: '4.0.0'
+    });
+});
+
+// ─── POST /download — BreadBot integration ───────────────────
 // Bot: POST /download {url, kind} -> expects { mediaUrl, title, mimetype, kind, sizeBytes }
+// v3.0: generic direct-URL download only (no site-specific resolvers).
 app.post('/download', dataApi, async (req, res) => {
     try {
         const { url, kind = 'auto' } = req.body || {};
@@ -637,14 +680,8 @@ app.post('/download', dataApi, async (req, res) => {
             return res.status(400).json({ error: 'URL parameter is required', example: { "url": "https://..." } });
         }
         const baseUrl = req.protocol + '://' + req.get('host');
-        let out;
-        if (media.ytId(url)) {
-            console.log(`[download] YouTube ${kind}: ${url}`);
-            out = await media.ytDownload(url, kind === 'video' ? 'video' : 'audio', baseUrl);
-        } else {
-            console.log(`[download] Direct ${kind}: ${String(url).slice(0, 120)}`);
-            out = await media.genericDownload(url, kind, baseUrl);
-        }
+        console.log(`[download] Direct ${kind}: ${String(url).slice(0, 120)}`);
+        const out = await media.genericDownload(url, kind, baseUrl);
         return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, mimetype: out.mimetype, kind: out.kind, sizeBytes: out.sizeBytes });
     } catch (e) {
         console.error('Download error:', e);
@@ -656,7 +693,7 @@ app.post('/download', dataApi, async (req, res) => {
 app.post('/cleanup', dataApi, (req, res) => {
     try {
         const result = temp.cleanup();
-        res.json({ 
+        res.json({
             success: true,
             message: 'Cleanup triggered successfully',
             deletedFiles: result.deletedCount || 0,
@@ -664,14 +701,14 @@ app.post('/cleanup', dataApi, (req, res) => {
         });
     } catch (e) {
         console.error('Cleanup error:', e);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Cleanup failed',
-            message: e.message 
+            message: e.message
         });
     }
 });
 
-// ─── v2.5.2 PERIODIC TEMP SWEEP — disk stays clean even on idle days ───
+// ─── PERIODIC TEMP SWEEP — disk stays clean even on idle days ───
 setInterval(() => {
     try {
         const r = temp.cleanup();
@@ -686,7 +723,7 @@ app.use((req, res) => {
         availableEndpoints: [
             'POST /search',
             'POST /search-video',
-            'POST /search-music', 
+            'POST /search-music',
             'POST /search-lyrics',
             'POST /album',
             'GET /album/:id/next',
@@ -710,14 +747,10 @@ app.use((err, req, res, next) => {
     });
 });
 
-/* v2.5: periodic temp hygiene on long runs — v2.8.1: this used to be a
- * SECOND sweep interval (30 min) running alongside the v2.5.2 15-min
- * sweep above — same job twice. Removed; the 15-min sweep above owns it. */
-
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Intelligent Scraper running on port ${PORT}`);
     console.log(`📁 Temp directory: ${temp.TEMP_DIR}`);
-    console.log(`🔍 Available search types: images, videos, music, lyrics`);
+    console.log(`🔗 MYLINKS-ONLY mode: media comes ONLY from your slots (my_links.json / MYLINKS env / per-request)`);
     console.log(`🌐 Health check: http://localhost:${PORT}/health`);
 });

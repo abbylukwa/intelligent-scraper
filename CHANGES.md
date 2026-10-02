@@ -1,5 +1,141 @@
 # Intelligent Scraper — CHANGES
 
+## v4.0.0 — PLAYER-CONFIG VIDEO EXTRACTOR + 3 NEW VIDEO SITES + ALL SLOTS ON (whole-number release)
+
+WHY: owner asked for "a full upgraded version which also downloads
+videos — add 3 sites of your choice which provide scraped videos",
+then "turn everything on".
+
+1. v4.0 PLAYER-CONFIG EXTRACTOR (media.js) — tube sites hide the REAL
+   file inside their player JS/JSON, not in plain <a>/<video> markup.
+   Generic patterns (ZERO hostnames in code — sites live only in
+   my_links.json): html5player setVideoUrlHigh/Low, JSON-LD contentUrl,
+   KVS flashvars video_url (with https-recovery for "function/0/"-style
+   prefixes), <source>/<video> tags, script src:/"file": slots.
+2. RELATIVE video-page links — the old harvester only matched absolute
+   URLs, so xnxx-style /video-xxx/… search links (and eporner, thisvid)
+   were invisible. Now href/src relatives are absolutized against the
+   slot URL, NAV listing pages (/search, /playlists, /categories…) are
+   excluded so watch pages get the page budget, and CDN preview/thumb
+   loops (5s junk mp4s) are filtered out.
+3. HOTLINK-PROTECTED CDNs — video downloads now go through the
+   UA+Referer fallback chain (the page that produced the URL is the
+   Referer hint) before the plain capped fetch. Player-config URLs
+   rank FIRST in the candidate sort (they are the real files).
+4. THREE NEW VIDEO SLOTS (owner's "3 sites of your choice"), live-
+   auditioned end-to-end through the real /video pipeline:
+   · 15 XNXX      — PROVEN: 8.1MB real mp4 in 2s (player-config path)
+   · 16 XMegaDrive — PROVEN: 10MB real mp4 (common tag listings)
+   · 17 EPorner   — extraction PROVEN (contentUrl → gvideo .mp4); its
+     CDN 403s datacenter IPs (residential IPs deliver fine)
+   Also auditioned and rejected from this box: spankbang/xgroovy/
+   xanimu (403 WAF), porntrex (CDN hang), thisvid (single-use get_file
+   404), xhamster/porntn/xmilf/iceporn (JS-rendered grids, 0 links),
+   motherless/tubepornclassy (dead DNS), porn555/hdzog/sunporno (0
+   links). xhamster/pornhub/video stay dead from datacenter IPs.
+5. OWNER TURNED EVERYTHING ON: all 17 slots enabled:true (was 5/14).
+   Older WAF facts stay as warnings in the file's _HOW_TO. File order
+   is kept — YonaYethuu stays first among video slots.
+6. Version 3.1.1 → 4.0.0 (whole number) in server.js + package.json.
+TESTS: test_v30_zerolinks 18/18 · test_v31_sites 14/14 (registry
+assertions updated to the 17-slot all-on state) · live audition: XNXX
+8.1MB ✓ · XMegaDrive 10MB ✓.
+
+## v3.1.1 — LIVE SLOT AUDIT: junk-filter bug fix + registry repair
+
+WHY: owner asked to "test if everything works and list all the new
+links". The per-slot live test exposed a REAL bug and one dead slot.
+
+1. FIXED (HIGH) — image junk filter rejected EVERY WordPress image:
+   JUNK_URL_RE contained `ads?[-_/.]` which matches the `ads/` inside
+   `upl**oads/**` — so every `wp-content/uploads/...jpg` thumbnail from
+   WordPress sites (DarkNaija, MzansiFun, most blog CMSes) was dropped
+   as "ads" and image slots returned 0 results. Now `\bads?[-_/.]`
+   (word boundary): /wp-content/uploads/… passes, /ads/banner.jpg and
+   ad-1.png are still rejected. 7/7 filter expectations verified;
+   DarkNaija went 0 → 42 extracted images per page (only the site
+   logo still filtered).
+2. REGISTRY REPAIR (my_links.json):
+   - slot 1 PornPics (image) → enabled:false: the site WAF-blocks
+     datacenter IPs with ECONNRESET (from Render's IP too — the same
+     block was observed in production). Documented in _HOW_TO.
+   - slot 2 DarkNaija (image) → url switched to the query-relevant
+     search form ?s={query} (the bare homepage only had recent posts;
+     the ?s= form is already used by video slot 14 and returns 40
+     query-matched images per page).
+3. Per-slot live-test method fixed too: video slots are now tested in
+   ISOLATION by hot-swapping the registry to one slot at a time (the
+   old per-request method was masked — sortSlotsByFileOrder pins file
+   slots ahead of request slots, so every test was answered by
+   YonaYethuu).
+4. version strings 3.1.0 → 3.1.1 (server.js /status + package.json).
+
+## v3.1.0 — OWNER SLOTS + SITE PICKER: my_links.json is the ONLY source
+
+WHY: owner supplied 14 slots ("add these sites") and asked that video
+searches start on YonaYethuu by default with a way to pick another site.
+
+1. my_links.json populated with the owner's 14 slots (file order):
+   image  = PornPics (template /search/?q={query} — the bare homepage
+            form was near-dead at 1 result), DarkNaija (auto ?s=),
+            xvideos OFF;
+   gif    = PornHub /gifs, DarkNaija Nude Pictures category, xvideos
+            OFF, WetGIF ?s={query}&lang=en;
+   video  = YonaYethuu (?s={query}) FIRST, then MzansiFun
+            (?keyword={query}), HDPornPics.xxx (/search/{query}/),
+            DarkNaija Leak Videos, PornPics /videos/, xvideos template
+            OFF, DarkNaija ?s={query}.
+2. /video accepts a site pick: name substring or pure slot number
+   ("site:yona" / "site:2" / "#2"); numeric picks never substring-match
+   URLs (a mock test caught 127.0.0.1 matching "2"). Unknown site =
+   404 + the available[] list. sortSlotsByFileOrder pins FILE order
+   even when the bot forwards the same URLs as env/request slots.
+3. GET /video-sites: numbered, default-first list for the bot's
+   !vidsites command; /status now triggers the mtime hot-reload check.
+4. Gif slots also extract .mp4/.webm loops (blog "gif" posts embed
+   mp4 — DarkNaija Nude Pictures class).
+5. FINAL SWEEP (single-source-of-truth audit): zero media-site URLs or
+   site names remain in any functional file (server.js, media.js,
+   album.js, utils.js, temp.js) — the only matches are comments
+   explaining the site-picker. Every search/download comes exclusively
+   from my_links.json (hot-reloaded) / MYLINKS env / per-request.
+6. package.json synced to 3.1.0 (was stale at 2.9.0).
+7. Tests: scripts/test_v31_sites.js 13/13 (registry order, site pick,
+   404+available, gif mp4 extraction, hot-reload restore);
+   scripts/test_v30_zerolinks.js 17/17 (zero built-in sources, honest
+   404s, per-request slots, 34.5MB video via slot, hot-reload).
+
+## v2.9.0 — MYLINKS-ONLY: the file is the single source of truth
+
+WHY: owner request — "use only the links in the file mylinks and
+replace those links with the ones in album and other files".
+
+1. my_links.json REWRITTEN (v2.9): the slots are now the exact URLs
+   the code's own engines use, each LIVE-VERIFIED from a datacenter IP
+   on 2026-10-01:
+     Xbooru DAPI       50 file_url attrs / query  (full-res, direct)
+     Rule34.xxx page   proven (thumbs auto-convert to full-res)
+     TBIB DAPI         15 file_url attrs / query  (full-res, direct)
+     Realbooru page    proven (thumbs auto-convert to full-res)
+     Tenor page        16 gif links / query  (relevance-sorted)
+     Giphy page        26 gif links / query  (relevance-sorted)
+   DarkNaija slot DROPPED (JS-walled, 0 results in every test).
+2. /search + /gif: NSFW requests (nsfw=true / site=nsfw, or env
+   MYLINKS_ONLY=1) now come ONLY from the MyLinks slots — the generic
+   engine chain is SKIPPED (no Bing/Wikimedia/1px junk in NSFW
+   results, ever). SFW requests keep the clean Wikimedia fallback.
+   EMERGENCY fallback: if MyLinks returns ZERO on an NSFW request, the
+   engines run once so the bot never sends nothing.
+3. /video unchanged: the built-in xnxx -> xhamster -> eporner chain
+   from media.js (documented in the file's _HOW_TO).
+4. Live-proven matrix (v2.9.0 instance):
+   NSFW search  105 images, 105 from MyLinks, 0 foreign leads
+   NSFW gif      27 gifs, all MyLinks
+   SFW search   110 images (MyLinks lead + Wikimedia)
+   video         xnxx 1.6-2.2MB
+
+# Intelligent Scraper — CHANGES
+
 ## v2.8.2 — NSFW-ONLY VIDEO: every non-NSFW download fallback removed
 
 WHY: owner request — "remove all the non-nsfw fallback on the downloads".

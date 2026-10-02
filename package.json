@@ -1,7 +1,7 @@
 {
   "name": "intelligent-scraper",
-  "version": "2.8.2",
-  "description": "intelligent-scraper 2.5 - MY-LINKS-FIRST search + gif channel, hot-reloaded my_links.json, per-slot diagnostics, hotlink-protected CDN downloads (UA + Referer fallback), BreadBot /music /video /download integration",
+  "version": "4.0.0",
+  "description": "intelligent-scraper 3.1 - MYLINKS-ONLY: my_links.json is the single source of truth (hot-reloaded slots: image/gif/video/music), site-picker on /video, zero built-in sites, per-slot diagnostics, BreadBot /search /gif /video /music /download integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
