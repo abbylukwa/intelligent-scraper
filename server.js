@@ -280,6 +280,47 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ─── v82: Toggle site enable/disable ───
+app.post('/toggle-site', (req, res) => {
+    try {
+        const { slot, enabled } = req.body || {};
+        if (slot == null) return res.status(400).json({ ok: false, error: 'Missing slot' });
+        loadMyLinks(true);
+        const link = MY_LINKS.find(l => l.slot === parseInt(slot));
+        if (!link) return res.status(404).json({ ok: false, error: 'Slot not found' });
+        link.enabled = !!enabled;
+        // Write back to my_links.json
+        const raw = JSON.parse(fs.readFileSync(MY_LINKS_FILE, 'utf8'));
+        const target = (raw.links || []).find(l => l.slot === parseInt(slot));
+        if (target) target.enabled = !!enabled;
+        fs.writeFileSync(MY_LINKS_FILE, JSON.stringify(raw, null, 2));
+        console.log(`TOGGLE: slot #${slot} → ${enabled ? 'ON' : 'OFF'}`);
+        res.json({ ok: true, slot: parseInt(slot), enabled: !!enabled });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+// ─── v82: Per-site test ───
+app.post('/test-site', async (req, res) => {
+    try {
+        const { slot, query = 'test' } = req.body || {};
+        if (slot == null) return res.status(400).json({ ok: false, error: 'Missing slot' });
+        loadMyLinks(true);
+        const link = MY_LINKS.find(l => l.slot === parseInt(slot));
+        if (!link) return res.status(404).json({ ok: false, error: 'Slot not found' });
+        const t0 = Date.now();
+        // Try a quick search on this site
+        const kind = link.type || 'image';
+        const endpoint = kind === 'video' ? '/video' : kind === 'gif' ? '/gif' : kind === 'music' ? '/music' : '/search';
+        const result = await axios.post(`http://localhost:${PORT}${endpoint}`, { query, site: String(slot) }, { timeout: 15000 });
+        const ms = Date.now() - t0;
+        res.json({ ok: true, slot: parseInt(slot), name: link.name, type: kind, results: (result.data && result.data.results) ? result.data.results.length : 0, ms });
+    } catch (e) {
+        res.json({ ok: false, slot: req.body && req.body.slot, error: e.message, ms: 0 });
+    }
+});
+
 // ─── Optional token auth ──────────────────────────────────────
 // If SCRAPER_TOKEN is set here, data endpoints require the same token.
 // If not set, everything stays open exactly as before.
