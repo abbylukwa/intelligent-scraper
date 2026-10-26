@@ -1,6 +1,6 @@
 {
   "name": "intelligent-scraper",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "intelligent-scraper 4.1 - MYLINKS-ONLY: my_links.json is the single source of truth (hot-reloaded slots: image/gif/video/music), site-picker on /video, zero built-in sites, per-slot diagnostics, SSRF-guarded, Node 18/20/22 compatible (p-limit@4 CJS)",
   "main": "server.js",
   "scripts": {

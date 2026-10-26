@@ -1,5 +1,15 @@
 # Intelligent Scraper — CHANGES
 
+## v4.2.0 — TRUTHFUL LINK LIFETIMES (v84.2 companion release)
+- /music, /video, /download responses now include `expiresInSeconds: 3600` +
+  `linkLifetime` note: temp copies are swept after 1h, 100 items, or service
+  restart. Consumers (BreadBot panel) now keep their own long-lived copy and
+  label which link is which.
+- Version strings bumped 4.1.0 → 4.2.0 everywhere.
+
+## v4.1.0 and earlier — see git history / INVENTORY_AND_AUDIT.md
+# Intelligent Scraper — CHANGES
+
 ## v4.0.0 — PLAYER-CONFIG VIDEO EXTRACTOR + 3 NEW VIDEO SITES + ALL SLOTS ON (whole-number release)
 
 WHY: owner asked for "a full upgraded version which also downloads
