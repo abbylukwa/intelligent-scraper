@@ -1,7 +1,7 @@
 {
   "name": "intelligent-scraper",
-  "version": "4.0.0",
-  "description": "intelligent-scraper 3.1 - MYLINKS-ONLY: my_links.json is the single source of truth (hot-reloaded slots: image/gif/video/music), site-picker on /video, zero built-in sites, per-slot diagnostics, BreadBot /search /gif /video /music /download integration",
+  "version": "4.1.0",
+  "description": "intelligent-scraper 4.1 - MYLINKS-ONLY: my_links.json is the single source of truth (hot-reloaded slots: image/gif/video/music), site-picker on /video, zero built-in sites, per-slot diagnostics, SSRF-guarded, Node 18/20/22 compatible (p-limit@4 CJS)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -15,12 +15,8 @@
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "file-type": "^18.7.0",
     "fs-extra": "^11.1.1",
-    "mime-types": "^2.1.35",
-    "node-cache": "^5.1.2",
-    "p-limit": "^5.0.0",
-    "uuid": "^11.0.0"
+    "p-limit": "^4.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

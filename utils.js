@@ -3,6 +3,24 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+/* ─── v4.1 SSRF GUARD ─────────────────────────────────────────
+ * Every user-supplied URL (my_links slots, /download, /album) passes
+ * through here before any fetch. Blocks non-HTTP schemes and any
+ * host that resolves to loopback / private / link-local ranges, so a
+ * crafted slot can never probe Render's metadata endpoint, the
+ * container's own /temp folder or the internal network. */
+const BLOCKED_HOST_RE = /^(localhost$|127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|\[?::ffff:127\.)/i;
+function safeUrl(u) {
+    let parsed;
+    try { parsed = new URL(String(u)); } catch (e) { throw new Error('invalid url'); }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('scheme not allowed: ' + parsed.protocol);
+    }
+    const host = (parsed.hostname || '').toLowerCase();
+    if (BLOCKED_HOST_RE.test(host)) throw new Error('blocked host: ' + host);
+    return parsed.href;
+}
+
 // User agents for rotation — an honest bot UA FIRST (some CDNs 403
 // browser-style UAs); browser UAs follow for the sites that want them.
 // downloadImage retries naturally via the album download loop.
@@ -16,6 +34,7 @@ const USER_AGENTS = [
 
 async function fetchPage(url) {
     try {
+        url = safeUrl(url);                       // v4.1 SSRF guard
         const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
         
         const response = await axios.get(url, {
@@ -33,7 +52,8 @@ async function fetchPage(url) {
                 'Cache-Control': 'max-age=0'
             },
             timeout: 15000,
-            maxRedirects: 5
+            maxRedirects: 5,
+            maxContentLength: 25 * 1024 * 1024   // v4.1: cap HTML pages at 25MB
         });
         
         return response.data;
@@ -43,8 +63,15 @@ async function fetchPage(url) {
     }
 }
 
+const EXT_BY_MIME = {
+    'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
+    'image/webp': '.webp', 'image/gif': '.gif', 'image/bmp': '.bmp',
+    'image/avif': '.avif'
+};
+
 async function downloadImage(url) {
     try {
+        url = safeUrl(url);                       // v4.1 SSRF guard
         const response = await axios({
             method: 'GET',
             url: url,
@@ -55,10 +82,20 @@ async function downloadImage(url) {
             },
             // FIX: was timeout: 13200000 (3.6 hours!) — downloads hung for hours
             // before. 30s is enough for a single image.
-            timeout: 30000
+            timeout: 30000,
+            maxContentLength: 40 * 1024 * 1024    // v4.1: never pull >40MB "images"
         });
         
-        const filename = crypto.createHash('md5').update(url).digest('hex') + '.jpg';
+        // v4.1 FIX: was hardcoded '.jpg' — a PNG/GIF saved as .jpg broke
+        // WhatsApp preview MIME and /album/:id/next downloads. Derive the
+        // extension from Content-Type, falling back to the URL, then .jpg.
+        const ctype = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        let ext = EXT_BY_MIME[ctype];
+        if (!ext) {
+            const m = /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.exec(url);
+            ext = m ? ('.' + m[1].toLowerCase().replace('jpeg', 'jpg')) : '.jpg';
+        }
+        const filename = crypto.createHash('md5').update(url).digest('hex') + ext;
         const filepath = path.join(__dirname, 'temp', filename);
         
         const writer = fs.createWriteStream(filepath);
@@ -68,6 +105,7 @@ async function downloadImage(url) {
             writer.on('finish', () => resolve({
                 path: filepath,
                 filename: filename,
+                ext: ext,
                 url: url,
                 size: fs.statSync(filepath).size
             }));
@@ -115,7 +153,7 @@ function extractImageUrls(html, baseUrl) {
  * holders, trackers, base64 blobs, svg chrome and extension-less
  * mystery links are all rejected. Anything not matching a known
  * image extension must come from a recognised image CDN to pass. */
-const JUNK_URL_RE = /(logo|sprite|sprite|favicon|avatar|button|btn[_-]|\bads?[-_/.]|pixel|tracker|spacer|blank|loading|placeholder|default\.(png|jpg|gif)|emoji|smiley|profile[_-]?pic|captcha|recaptcha|badge|flag[_-]|rating|stars?[_-]|social|share[-_]|\/ads\/|\/ad\/|doubleclick|googletagmanager|google-analytics|\/icons?\/|\/sprites?\/|_icon|_logo|-icon|-logo|icon\.|logo\.)/i;
+const JUNK_URL_RE = /(logo|sprite|sprite|favicon|avatar|ava_(male|female|gen)|button|btn[_-]|\bads?[-_/.]|pixel|tracker|spacer|blank|loading|placeholder|default\.(png|jpg|gif)|emoji|smiley|profile[_-]?pic|captcha|recaptcha|badge|flag[_-]|\/flag|ico_|rating|stars?[_-]|social|share[-_]|\/ads\/|\/ad\/|doubleclick|googletagmanager|google-analytics|\/icons?\/|\/sprites?\/|_icon|_logo|-icon|-logo|icon\.|logo\.)/i;
 const IMG_EXT_RE  = /\.(png|jpe?g|webp|gif)(\?|#|$)/i;
 
 function isJunkImageUrl(u) {
@@ -231,6 +269,7 @@ function relevantGifs(urls, query){
 }
 
 module.exports = {
+    safeUrl,
     fetchPage,
     downloadImage,
     extractImageUrls,

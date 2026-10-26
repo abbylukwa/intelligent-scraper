@@ -21,12 +21,14 @@
 
 const axios = require('axios');
 const temp = require('./temp');
+const { safeUrl } = require('./utils');   // v4.1 SSRF guard
 
 const MAX_MB = Math.max(1, parseInt(process.env.SCRAPER_MAX_MB || '40', 10));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 /* ── Capped download of a direct media URL (shared by everything) ── */
 async function fetchCapped(url) {
+    url = safeUrl(url);                       // v4.1 SSRF guard
     const cap = MAX_MB * 1024 * 1024;
     const r = await axios.get(url, {
         responseType: 'arraybuffer',
@@ -219,9 +221,16 @@ function extractPlayerVideos(html) {
         re.lastIndex = 0;
         let m;
         while ((m = re.exec(s))){
-            /* KVS flashvars sometimes prefix the real url ("function/0/https://…")
-             * — recover the actual https url from the captured text. */
-            const u = String(m[1]).replace(/^.*?(https?:\/\+)/, '$1')
+            /* v4.1 FIX: KVS flashvars encode the real url three different
+             * ways — "function/0/https://…", percent-encoded
+             * "https%3A%2F%2F…" and JS-escaped "https:\/\/…". The old
+             * recovery only handled the first, so flagship slots silently
+             * produced zero player URLs. Normalise every form. */
+            let u = String(m[1]);
+            if (/%3a/i.test(u)) {
+                try { u = decodeURIComponent(u); } catch (e) {}
+            }
+            u = u.replace(/^.*?(https?:\/+)/, '$1')
                 .replace(/\\u002F/gi, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&');
             if (/^https?:\/\/.+/i.test(u)) out.push(u);
         }

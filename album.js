@@ -2,7 +2,11 @@ const utils = require('./utils');
 const temp = require('./temp');
 const pLimit = require('p-limit');
 
-const ALBUM_MAP = {};
+// v4.1 FIX: was a plain `{}` — `'x' in ALBUM_MAP` walks the prototype
+// chain, so `'constructor' in ALBUM_MAP` was always true and the
+// keyword branch assigned the Function object itself as albumUrl →
+// guaranteed crash. Object.create(null) makes `in` safe.
+const ALBUM_MAP = Object.create(null);
 
 /* ══════════════════════════════════════════════════════════════
  *  v3.0 ZERO BUILT-IN SOURCES — album.js is now source-free.
@@ -16,9 +20,10 @@ const ALBUM_MAP = {};
 
 async function downloadAlbum(albumUrlOrKeyword, concurrency = 3) {
     let albumUrl = albumUrlOrKeyword;
-    if (albumUrlOrKeyword in ALBUM_MAP) {
+    if (Object.prototype.hasOwnProperty.call(ALBUM_MAP, albumUrlOrKeyword)) {
         albumUrl = ALBUM_MAP[albumUrlOrKeyword];
     }
+    albumUrl = utils.safeUrl(albumUrl);   // v4.1 SSRF guard
     const html = await utils.fetchPage(albumUrl);
     const imageUrls = await utils.extractImageUrls(html, albumUrl);
     if (imageUrls.length === 0) {
