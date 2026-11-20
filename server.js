@@ -721,6 +721,7 @@ app.post('/video', dataApi, async (req, res) => {
 // direct mp4s, then the WHOLE list is scored against the full query
 // with the weighted engine and returned best-first. The bot shows/
 // resolves the top picks and walks down the list on "next".
+const relevance = require('./relevance');
 app.post('/video-ranked', dataApi, async (req, res) => {
     try {
         const { query, q, site } = req.body || {};
@@ -734,9 +735,9 @@ app.post('/video-ranked', dataApi, async (req, res) => {
         if (site && !picked.slots.length) {
             return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.3.0' });
         }
-        slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
+        slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, relevance.searchTerms(searchQuery)) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.3.0' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.4.0' });
         }
         console.log(`[video-ranked] ${slots.length} slot(s) for "${searchQuery}"`);
         const out = await media.myLinksVideoRanked(slots, searchQuery, {});
@@ -744,7 +745,7 @@ app.post('/video-ranked', dataApi, async (req, res) => {
         return res.json({
             success: true, query: searchQuery,
             results: out.results, count: out.results.length,
-            errors: out.errors, version: '4.3.0'
+            errors: out.errors, version: '4.4.0'
         });
     } catch (e) {
         console.error('video-ranked error:', e.message);

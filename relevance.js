@@ -92,6 +92,58 @@ function phraseHit(text, words) {
     return re.test(text);
 }
 
+/* ═══ v4.4 GOOGLE-STYLE QUERY OPERATORS — research-proven web-query
+ * narrowing, applied to every search. The boss: "add more research on
+ * how to do a perfect web query to search what you want like google
+ * tags". Supported in ANY query the bot forwards:
+ *
+ *   "latina teen"        → quoted phrase MUST appear in the result title
+ *   latina -gay -shemale → minus words: any result containing them DIES
+ *   site:xvideos.com     → only results from that domain survive
+ *   intitle:teen         → word must be in the result title
+ *
+ * Operators are STRIPPED from the scoring tokens, turned into the URL
+ * search string most tube engines understand ("quoted phrases" + -minus
+ * words are honored by xvideos/xhamster/pornhub/xnxx/eporner search),
+ * AND enforced again here as a hard post-filter — so even a site that
+ * ignores the operators never leaks an off-topic result into the top.
+ * ═══════════════════════════════════════════════════════════════ */
+function queryPlan(rawQuery) {
+    let q = String(rawQuery || '');
+    const phrases = [];
+    const minus = [];
+    const titleMust = [];
+    let siteFilter = null;
+    q = q.replace(/"([^"]+)"/g, (m, p) => { const t = p.trim().toLowerCase(); if (t) phrases.push(t); return ' '; });
+    q = q.replace(/(?:^|\s)-([\p{L}\p{N}]{2,})/gu, (m, w) => { minus.push(w.toLowerCase()); return ' '; });
+    q = q.replace(/(?:^|\s)site:([a-z0-9.\-]+)/gi, (m, s) => { siteFilter = s.toLowerCase().replace(/^www\./, ''); return ' '; });
+    q = q.replace(/(?:^|\s)intitle:([\p{L}\p{N}"]{2,})/giu, (m, w) => { titleMust.push(w.toLowerCase().replace(/"/g, '')); return ' '; });
+    q = q.replace(/\s+/g, ' ').trim();
+    return { q, phrases, minus, siteFilter, titleMust };
+}
+/* the string a SEARCH URL wants: cleaned words + "quoted phrases" +
+ * -minus words (Google-style — tube search engines parse these) */
+function searchTerms(rawQuery) {
+    const plan = queryPlan(rawQuery);
+    let s = plan.q;
+    if (plan.phrases.length) s += ' ' + plan.phrases.map(p => '"' + p + '"').join(' ');
+    if (plan.minus.length) s += ' ' + plan.minus.map(w => '-' + w).join(' ');
+    return s.replace(/\s+/g, ' ').trim();
+}
+/* hard post-filter — returns true when a candidate SURVIVES the plan */
+function planSurvives(urlOrTitle, plan) {
+    if (!plan) return true;
+    const t = typeof urlOrTitle === 'string' ? titleOf(urlOrTitle) : '';
+    if (plan.minus.length && plan.minus.some(w => t.includes(w))) return false;
+    if (plan.siteFilter) {
+        try { const h = new URL(String(urlOrTitle)).hostname.replace(/^www\./, ''); if (!h.includes(plan.siteFilter)) return false; }
+        catch (e) { return false; }
+    }
+    if (plan.titleMust.length && !plan.titleMust.every(w => t.includes(w))) return false;
+    if (plan.phrases.length && !plan.phrases.every(p => phraseHit(t, p.split(/\s+/)))) return false;
+    return true;
+}
+
 /* THE score — 0..100 */
 function scoreOf(url, words, phrase) {
     const s = String(url || '').toLowerCase();
@@ -118,11 +170,15 @@ function scoreOf(url, words, phrase) {
 }
 
 /* rank [{url,...}] items by relevance, best first. Ties keep the
- * original discovery order (stable sort). Returns a NEW array. */
+ * original discovery order (stable sort). Returns a NEW array.
+ * v4.4: opts.plan (from queryPlan) enforces operators as a hard filter
+ * BEFORE scoring — operator-violating candidates never rank at all. */
 function rankResults(items, query, opts = {}) {
-    const words = opts.words || tokenize(query);
+    const words = opts.words || tokenize(opts.plan ? opts.plan.q : query);
     const phrase = words.length ? words.join(' ') : '';
+    const plan = opts.plan || null;
     const scored = (items || [])
+        .filter(it => planSurvives(typeof it === 'string' ? it : (it.url || ''), plan))
         .map((it, i) => ({ it, i, score: scoreOf(typeof it === 'string' ? it : (it.url || it.title || ''), words, phrase) }))
         .sort((a, b) => (b.score - a.score) || (a.i - b.i))
         .map(x => x.it);
@@ -135,4 +191,4 @@ function rankResults(items, query, opts = {}) {
     return scored;
 }
 
-module.exports = { tokenize, titleOf, scoreOf, rankResults, boundaryHit, phraseHit, MEDIA_NOUNS, STOPWORDS };
+module.exports = { tokenize, titleOf, scoreOf, rankResults, boundaryHit, phraseHit, queryPlan, searchTerms, planSurvives, MEDIA_NOUNS, STOPWORDS };

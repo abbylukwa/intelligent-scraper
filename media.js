@@ -456,7 +456,11 @@ async function myLinksMusic(slots, query, baseUrl, opts = {}) {
  * The bot remembers this list, sends/resolves the top picks, and
  * "next" walks further down the SAME search — no re-query noise. */
 async function myLinksVideoRanked(slots, query, opts = {}) {
-    const words = relevance.tokenize(query);
+    /* v4.4: the query goes through the Google-operator planner — quoted
+     * phrases, -minus words, site:, intitle: become hard filters; the
+     * plan's cleaned words drive the scoring. */
+    const plan = relevance.queryPlan(query);
+    const words = relevance.tokenize(plan.q);
     const phrase = words.join(' ');
     const diag = opts.diag || {};
     const errors = [];
@@ -476,7 +480,9 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
         const cands = [
             ...pages.map(u => ({ url: u, kind: 'page' })),
             ...directs.map(u => ({ url: u, kind: 'direct' }))
-        ].filter(c => { if (seen.has(c.url)) return false; seen.add(c.url); return true; });
+        ].filter(c => { if (seen.has(c.url)) return false; seen.add(c.url); return true; })
+         /* v4.4: operator plan kills off-topic candidates at the door */
+         .filter(c => relevance.planSurvives(c.url, plan));
         return { slotName, cands };
     }
 
@@ -516,7 +522,7 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
             break;
         }
     }
-    const ranked = relevance.rankResults(out, query, { words, topicGate: 0 })
+    const ranked = relevance.rankResults(out, plan.q, { words, plan, topicGate: 0 })
         .map(r => ({ ...r, score: r.score != null ? r.score : relevance.scoreOf(r.url, words, phrase) }));
     return { results: ranked.slice(0, 24), errors, diag };
 }
