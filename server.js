@@ -274,6 +274,18 @@ app.get('/my-links', (req, res) => {
     });
 });
 
+// ─── GET / and /ping — cron-job.org keep-alive targets ────────
+// v4.3.1: cron-job.org pings the ROOT url. There was no / route, so
+// every ping got a 404 → "HTTP error" → the keep-alive job got
+// DISABLED and Render went to sleep. Root and /ping now answer a tiny
+// JSON (also fine for HEAD requests — no big output ever).
+app.get('/', (req, res) => {
+    res.json({ ok: true, service: 'intelligent-scraper', version: '4.3.0', hint: 'POST /search /video /video-ranked /video-resolve /music /download · GET /my-links /video-sites /health' });
+});
+app.get('/ping', (req, res) => {
+    res.json({ ok: true, ts: Date.now() });
+});
+
 app.get('/health', (req, res) => {
     res.json({
         ok: true,
