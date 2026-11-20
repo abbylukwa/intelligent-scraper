@@ -225,7 +225,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '4.2.0',
+        version: '4.3.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         tempSizeMB: Number(stats.totalSizeMB) || 0,
@@ -240,6 +240,8 @@ app.get('/status', (req, res) => {
             '/gif',
             '/music',
             '/video',
+            '/video-ranked',
+            '/video-resolve',
             '/video-sites',
             '/download',
             '/cleanup',
@@ -262,7 +264,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '4.2.0',
+        version: '4.3.0',
         howTo: 'MYLINKS-ONLY (zero built-in sites). THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Types: image, gif, video, music. {query} template optional, enabled:false switches a slot off. A dead slot never breaks a search.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -367,7 +369,7 @@ app.post('/search', dataApi, async (req, res) => {
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             hint: myUrls.length ? undefined : NO_SOURCES_HINT,
-            version: '4.2.0'
+            version: '4.3.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -402,7 +404,7 @@ app.post('/search-video', dataApi, async (req, res) => {
                 error: 'site "' + site + '" not found',
                 available: picked.available,
                 hint: 'Send one of the available names, or a slot number.',
-                version: '4.2.0'
+                version: '4.3.0'
             });
         }
         slots = picked.slots;
@@ -433,7 +435,7 @@ app.post('/search-video', dataApi, async (req, res) => {
             myLinks: videos.length,
             site: site || undefined,
             hint: videos.length ? undefined : NO_SOURCES_HINT,
-            version: '4.2.0'
+            version: '4.3.0'
         });
     } catch (e) {
         console.error('Video search error:', e);
@@ -469,7 +471,7 @@ app.post('/search-music', dataApi, async (req, res) => {
             count: music.length,
             myLinks: music.length,
             hint: music.length ? undefined : NO_SOURCES_HINT,
-            version: '4.2.0'
+            version: '4.3.0'
         });
     } catch (e) {
         console.error('Music search error:', e);
@@ -500,7 +502,7 @@ app.post('/search-lyrics', dataApi, async (req, res) => {
             lyrics: [],
             count: 0,
             hint: NO_SOURCES_HINT,
-            version: '4.2.0'
+            version: '4.3.0'
         });
     } catch (e) {
         console.error('Lyrics search error:', e);
@@ -611,7 +613,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             hint: myGifs.length ? undefined : NO_SOURCES_HINT,
-            version: '4.2.0'
+            version: '4.3.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -637,7 +639,7 @@ app.post('/music', dataApi, async (req, res) => {
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'music')
             .map(l => ({ name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.2.0' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.3.0' });
         }
         console.log(`[music] ${slots.length} music slot(s) for: "${searchQuery}"`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -649,7 +651,7 @@ app.post('/music', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Music error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.2.0' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.3.0' });
     }
 });
 
@@ -681,12 +683,12 @@ app.post('/video', dataApi, async (req, res) => {
                 error: 'site "' + site + '" not found',
                 available: picked.available,
                 hint: 'Send one of the available names, or a slot number. !vidsites lists them.',
-                version: '4.2.0'
+                version: '4.3.0'
             });
         }
         slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.2.0' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.3.0' });
         }
         console.log(`[video] ${slots.length} video slot(s) for: "${searchQuery}"${site ? ' (site=' + site + ')' : ''} — order: ${slots.map(s => s.name).join(' → ')}`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -696,7 +698,67 @@ app.post('/video', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Video error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.2.0' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.3.0' });
+    }
+});
+
+// ─── POST /video-ranked — v4.3 the "5 most relevant" engine ────
+// Bot: POST /video-ranked {query, site?, myLinks?, exclude?} →
+// { success, results: [{ title, url, site, kind, score }], count }
+// Every video slot's search page is scraped for watch-page links +
+// direct mp4s, then the WHOLE list is scored against the full query
+// with the weighted engine and returned best-first. The bot shows/
+// resolves the top picks and walks down the list on "next".
+app.post('/video-ranked', dataApi, async (req, res) => {
+    try {
+        const { query, q, site } = req.body || {};
+        const searchQuery = query || q;
+        if (!searchQuery || String(searchQuery).trim() === '') {
+            return res.status(400).json({ error: 'Query parameter is required', example: { "query": "iranian teen" } });
+        }
+        let slots = sortSlotsByFileOrder(getMyLinks('video', Array.isArray(req.body?.myLinks) ? req.body.myLinks
+            : (req.body?.myLinks ? [req.body.myLinks] : []), 'video'), 'video');
+        const picked = filterVideoSlots(slots, site);
+        if (site && !picked.slots.length) {
+            return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.3.0' });
+        }
+        slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
+        if (!slots.length) {
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.3.0' });
+        }
+        console.log(`[video-ranked] ${slots.length} slot(s) for "${searchQuery}"`);
+        const out = await media.myLinksVideoRanked(slots, searchQuery, {});
+        console.log(`[video-ranked] ${out.results.length} ranked result(s) for "${searchQuery}"`);
+        return res.json({
+            success: true, query: searchQuery,
+            results: out.results, count: out.results.length,
+            errors: out.errors, version: '4.3.0'
+        });
+    } catch (e) {
+        console.error('video-ranked error:', e.message);
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.3.0' });
+    }
+});
+
+// ─── POST /video-resolve — one watch page → one real file ─────
+// Bot: POST /video-resolve {url} → same shape as /video. Fetches the
+// page, pulls player-config + direct mp4s, downloads the first that
+// works under the cap, serves from /temp. This is how the bot sends
+// the video the user actually picked from a ranked list.
+app.post('/video-resolve', dataApi, async (req, res) => {
+    try {
+        const url = String((req.body || {}).url || '').trim();
+        if (!/^https?:\/\//i.test(url)) {
+            return res.status(400).json({ error: 'Body must be {"url": "https://…video page…"}', version: '4.3.0' });
+        }
+        const baseUrl = req.protocol + '://' + req.get('host');
+        const out = await media.resolveVideoPage(url, baseUrl, {});
+        console.log(`[video-resolve] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
+        return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: out.source, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes,
+            expiresInSeconds: 3600, version: '4.3.0' });
+    } catch (e) {
+        console.error('video-resolve error:', e.message);
+        res.status(404).json({ error: 'Not downloadable', message: e.message, version: '4.3.0' });
     }
 });
 
@@ -709,7 +771,7 @@ app.get('/video-sites', dataApi, (req, res) => {
         success: true,
         defaultFirst: slots.length ? slots[0].name : null,
         sites: slots.map((s, i) => ({ pick: i + 1, slot: s.slot, name: s.name || s.url, url: s.url })),
-        version: '4.2.0'
+        version: '4.3.0'
     });
 });
 

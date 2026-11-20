@@ -1,5 +1,31 @@
 # Intelligent Scraper — CHANGES
 
+## v4.3.0 — WEIGHTED RELEVANCE ENGINE + RANKED VIDEO SEARCH (v92 companion)
+
+WHY: the boss called the old results "2% relevant — they don't do
+exactly what I want". The old scorer was BINARY (one query word
+anywhere → win), so the first site in file order always served
+whatever it had.
+
+1. relevance.js — NEW scoring module. Every candidate 0-100 vs the
+   WHOLE query: per-word coverage ×46, full-phrase match +34,
+   all-words bonus +12, word-boundary hits weigh more than substring
+   noise, cheap plural folding. Stable ranking (ties keep discovery
+   order).
+2. media.js — myLinksVideo (single best) now ranks players by the
+   weighted score (DESCENDING — the old ascending sort ranked the
+   LEAST relevant first); myLinksMusic ranking upgraded too.
+3. POST /video-ranked — the "5 most relevant" engine: batched
+   concurrency (12 slots at a time), 25s budget, every slot's search
+   page harvested for watch pages + direct mp4s, whole list scored
+   and returned best-first [{title,url,site,kind,score}].
+4. POST /video-resolve — one watch page → one real file (player-config
+   + direct mp4 extraction, UA/Referer fallback, cap honoured).
+5. LIVE PIPELINE PROOF (2026-11-20): "iranian teen" → 24 candidates,
+   ALL score-100 on-topic, in 2.4s → /video-resolve → 25.2MB real
+   ISO-Media MP4 in 3.9s. End-to-end verified.
+- Version strings bumped 4.2.0 → 4.3.0.
+
 ## v4.2.0 — TRUTHFUL LINK LIFETIMES (v84.2 companion release)
 - /music, /video, /download responses now include `expiresInSeconds: 3600` +
   `linkLifetime` note: temp copies are swept after 1h, 100 items, or service

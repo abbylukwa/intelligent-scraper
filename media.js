@@ -22,6 +22,7 @@
 const axios = require('axios');
 const temp = require('./temp');
 const { safeUrl } = require('./utils');   // v4.1 SSRF guard
+const relevance = require('./relevance'); // v4.3 weighted relevance engine
 
 const MAX_MB = Math.max(1, parseInt(process.env.SCRAPER_MAX_MB || '40', 10));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -174,11 +175,14 @@ function slugTitleOf(url) {
     } catch (e) { return ''; }
 }
 
-/* query-vs-URL relevance: candidates carrying query words rank first */
+/* v4.3 weighted query-vs-URL relevance (replaces the old binary
+ * "some word appears → first" scoring the boss called 2% relevant).
+ * Candidates with more query-word coverage, boundary hits and the
+ * full phrase rank first; equal scores keep discovery order. */
 function relevanceScore(url, words) {
-    if (!words.length) return 0;
-    const s = String(url).toLowerCase();
-    return words.some(w => s.includes(w)) ? 0 : 1;
+    if (!Array.isArray(words) || !words.length) return 0;   /* no query → no signal, keep discovery order */
+    const phrase = words.join(' ');
+    return relevance.scoreOf(url, words, phrase);
 }
 function qualityScore(u) {
     return (/720/.test(u) ? 3 : /480|540|640/.test(u) ? 2 : /360/.test(u) ? 1 : 0);
@@ -330,7 +334,7 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
             if (!cands.length) {
                 pageHits = extractVideoPages(s.data, slot.url)
                     .filter(u => !VIDEO_RECENT.includes(u))
-                    .sort((a, b) => relevanceScore(a, words) - relevanceScore(b, words))
+                    .sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words))
                     .slice(0, 6);
                 for (const vp of pageHits) {
                     try {
@@ -347,12 +351,13 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                     } catch (e) { /* next page */ }
                 }
             }
-            /* rank: player-config urls first, then on-topic, quality, length */
+            /* rank: player-config urls first, then WEIGHTED on-topic
+             * (v4.3: descending — high relevance score wins), quality, length */
             cands = [...new Set(cands)]
                 .filter(u => !titleExcluded(slugTitleOf(u)))
                 .sort((a, b) =>
                     ((strong.has(b) ? 1 : 0) - (strong.has(a) ? 1 : 0)) ||
-                    (relevanceScore(a, words) - relevanceScore(b, words)) ||
+                    (relevanceScore(b, words) - relevanceScore(a, words)) ||
                     (qualityScore(b) - qualityScore(a)) ||
                     (b.length - a.length));
             if (!cands.length) {
@@ -443,4 +448,117 @@ async function myLinksMusic(slots, query, baseUrl, opts = {}) {
     throw new Error('No music from your slots — ' + (errors.join(' | ') || 'no music slots configured'));
 }
 
-module.exports = { genericDownload, myLinksVideo, myLinksMusic, fetchCapped, MAX_MB, extractPlayerVideos, extractDirectVideos, extractVideoPages, downloadVideoCandidate };
+/* ═══ v4.3 RANKED VIDEO SEARCH — the "5 most relevant" engine ═══
+ * For every slot: fetch its search page → harvest same-host WATCH
+ * page links (+ direct mp4s as their own candidates) → score every
+ * candidate against the WHOLE query with the weighted engine →
+ * return the ranked list [{ title, url, site, score, kind }].
+ * The bot remembers this list, sends/resolves the top picks, and
+ * "next" walks further down the SAME search — no re-query noise. */
+async function myLinksVideoRanked(slots, query, opts = {}) {
+    const words = relevance.tokenize(query);
+    const phrase = words.join(' ');
+    const diag = opts.diag || {};
+    const errors = [];
+    const seen = new Set();
+    const out = [];
+
+    /* one slot → scrape its search page → candidate list (no downloads) */
+    async function huntSlot(slot) {
+        const slotName = slot.name || slot.url;
+        const s = await axios.get(slot.url, {
+            timeout: 12000,
+            headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
+        });
+        const pages = extractVideoPages(s.data, slot.url)
+            .filter(u => !VIDEO_RECENT.includes(u));
+        const directs = extractDirectVideos(s.data);
+        const cands = [
+            ...pages.map(u => ({ url: u, kind: 'page' })),
+            ...directs.map(u => ({ url: u, kind: 'direct' }))
+        ].filter(c => { if (seen.has(c.url)) return false; seen.add(c.url); return true; });
+        return { slotName, cands };
+    }
+
+    /* v4.3.1: BATCHED CONCURRENCY + TIME BUDGET — 135 slots one-by-one
+     * at 20s each is minutes; the boss wants results "as simple as
+     * that". Slots now run 12-at-a-time and the whole hunt stops at
+     * the budget (25s) or once 40+ candidates are banked, whichever
+     * comes first. Rank whatever was collected. */
+    const BUDGET_MS = 25000;
+    const BATCH = 12;
+    const t0 = Date.now();
+    const list = (slots || []).slice();
+    for (let i = 0; i < list.length; i += BATCH) {
+        const batch = list.slice(i, i + BATCH);
+        const settled = await Promise.allSettled(batch.map(huntSlot));
+        for (let j = 0; j < settled.length; j++) {
+            const slotName = batch[j].name || batch[j].url;
+            const r = settled[j];
+            if (r.status === 'fulfilled' && r.value.cands.length) {
+                diag[r.value.slotName] = r.value.cands.length;
+                out.push(...r.value.cands.map(c => ({
+                    title: slugTitleOf(c.url) || 'video',
+                    url: c.url,
+                    site: r.value.slotName,
+                    kind: c.kind
+                })));
+            } else {
+                const why = r.status === 'rejected'
+                    ? (r.reason && r.reason.message || 'fetch failed')
+                    : '0 video candidates';
+                diag[slotName] = 0;
+                errors.push(slotName + ': ' + why);
+            }
+        }
+        if (out.length >= 40 || Date.now() - t0 > BUDGET_MS) {
+            console.log(`[video-ranked] budget stop: ${Math.min(i + BATCH, list.length)}/${list.length} slots hunted, ${out.length} candidates in ${Date.now() - t0}ms`);
+            break;
+        }
+    }
+    const ranked = relevance.rankResults(out, query, { words, topicGate: 0 })
+        .map(r => ({ ...r, score: r.score != null ? r.score : relevance.scoreOf(r.url, words, phrase) }));
+    return { results: ranked.slice(0, 24), errors, diag };
+}
+
+/* ═══ v4.3 PAGE RESOLVER — turn ONE watch page into a real file ═══
+ * Given a video-page URL: fetch it, pull player-config mp4s (real
+ * files) + direct mp4s, rank quality/relevance, download the first
+ * that works under the cap. This is how the bot sends the video the
+ * user actually picked from a ranked list. */
+async function resolveVideoPage(pageUrl, baseUrl, opts = {}) {
+    const url = safeUrl(String(pageUrl || ''));
+    const p = await axios.get(url, {
+        timeout: 25000,
+        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
+    });
+    const strong = extractPlayerVideos(p.data);
+    const direct = extractDirectVideos(p.data);
+    let cands = [...new Set([].concat(strong, direct))];
+    if (!cands.length) throw new Error('no downloadable video links on that page');
+    /* prefer the biggest player-config url (High variants), then quality marker */
+    cands.sort((a, b) =>
+        ((strong.includes(b) ? 1 : 0) - (strong.includes(a) ? 1 : 0)) ||
+        (qualityScore(b) - qualityScore(a)) ||
+        (b.length - a.length));
+    let lastErr = null;
+    for (const cu of cands.slice(0, 6)) {
+        const ext = /\.webm(\?|$)/i.test(cu) ? '.webm' : '.mp4';
+        try {
+            const dl = await downloadVideoCandidate(cu, ext, url);
+            VIDEO_RECENT.push(pageUrl); if (VIDEO_RECENT.length > 15) VIDEO_RECENT.shift();
+            console.log(`[video-resolve] OK: ${slugTitleOf(cu)} (${(dl.buf.length / 1048576).toFixed(1)}MB) from ${pageUrl.slice(0, 80)}`);
+            return {
+                mediaUrl: baseUrl + '/temp/' + dl.id + dl.ext,
+                title: (slugTitleOf(cu) || slugTitleOf(pageUrl) || 'video'),
+                mimetype: ext === '.webm' ? 'video/webm' : 'video/mp4',
+                kind: 'video',
+                sizeBytes: dl.buf.length,
+                source: pageUrl
+            };
+        } catch (e) { lastErr = e; }
+    }
+    throw new Error('no downloadable file under the cap — ' + (lastErr ? lastErr.message : 'all candidates refused'));
+}
+
+module.exports = { genericDownload, myLinksVideo, myLinksMusic, myLinksVideoRanked, resolveVideoPage, fetchCapped, MAX_MB, extractPlayerVideos, extractDirectVideos, extractVideoPages, downloadVideoCandidate };
