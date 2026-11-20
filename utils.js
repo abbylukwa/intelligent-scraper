@@ -122,9 +122,17 @@ function extractImageUrls(html, baseUrl) {
     const images = [];
 
     $('img').each((i, elem) => {
-        let src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-original') || $(elem).attr('data-lazy-src');
-
-        if (src) {
+        /* v4.5 LAZY-LOAD FIX: pornpics (and most gallery sites) ship
+         * <img src="…/1px.png" data-src="full.jpg"> — the OLD priority
+         * took src FIRST, so every gallery image collapsed to the same
+         * 1px spacer and the whole pornpics slot contributed NOTHING.
+         * Now the first candidate that passes the junk gate wins:
+         * lazy attrs (which hold the real file) beat src. */
+        const cands = [$(elem).attr('data-src'), $(elem).attr('data-original'),
+                       $(elem).attr('data-lazy-src'), $(elem).attr('src')];
+        for (const raw of cands){
+            if (!raw) continue;
+            let src = raw;
             // Convert relative URLs to absolute
             if (src.startsWith('//')) {
                 src = 'https:' + src;
@@ -133,14 +141,8 @@ function extractImageUrls(html, baseUrl) {
             } else if (!src.startsWith('http')) {
                 src = baseUrl + '/' + src;
             }
-
-            // v2.4: junk filter — the old one only checked 'icon'/'logo'
-            // substrings, so site banners, sprites, avatars, default
-            // placeholders and 1px trackers all passed and the bot ended
-            // up downloading a 5KB logo instead of the actual image.
-            if (!isJunkImageUrl(src)) {
-                images.push(src);
-            }
+            // v2.4 junk gate; v4.5 also kills 1px/style spacer URLs
+            if (!isJunkImageUrl(src)) { images.push(src); break; }
         }
     });
 
@@ -153,7 +155,7 @@ function extractImageUrls(html, baseUrl) {
  * holders, trackers, base64 blobs, svg chrome and extension-less
  * mystery links are all rejected. Anything not matching a known
  * image extension must come from a recognised image CDN to pass. */
-const JUNK_URL_RE = /(logo|sprite|sprite|favicon|avatar|ava_(male|female|gen)|button|btn[_-]|\bads?[-_/.]|pixel|tracker|spacer|blank|loading|placeholder|default\.(png|jpg|gif)|emoji|smiley|profile[_-]?pic|captcha|recaptcha|badge|flag[_-]|\/flag|ico_|rating|stars?[_-]|social|share[-_]|\/ads\/|\/ad\/|doubleclick|googletagmanager|google-analytics|\/icons?\/|\/sprites?\/|_icon|_logo|-icon|-logo|icon\.|logo\.)/i;
+const JUNK_URL_RE = /(logo|sprite|favicon|avatar|ava_(male|female|gen)|button|btn[_-]|\bads?[-_/.]|pixel|tracker|spacer|blank|loading|placeholder|default\.(png|jpg|gif)|emoji|smiley|profile[_-]?pic|captcha|recaptcha|badge|flag[_-]|\/flag|ico_|rating|stars?[_-]|social|share[-_]|\/ads\/|\/ad\/|doubleclick|googletagmanager|google-analytics|\/icons?\/|\/sprites?\/|_icon|_logo|-icon|-logo|icon\.|logo\.|1px\.png|\/style\/img\/)/i;
 const IMG_EXT_RE  = /\.(png|jpe?g|webp|gif)(\?|#|$)/i;
 
 function isJunkImageUrl(u) {
