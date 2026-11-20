@@ -62,17 +62,34 @@ function diagRecord(key, count, error){
     MY_LINK_DIAG.set(key, { ts: new Date().toISOString(), count: count || 0, error: error || null });
 }
 
+/* v4.6: human name from a URL — request slots used to be listed as
+ * "undefined — bot-link-N" garbage in the site picker (135 of them when
+ * the bot forwards its whole registry). A hostname tells the owner WHAT
+ * the slot actually is. */
+function hostnameName(url, fallback){
+    try { return new URL(String(url)).hostname.replace(/^www\./, ''); } catch (e) { return fallback; }
+}
+
 function getMyLinks(type, extraLinks, extraType){
     loadMyLinks(false);
-    let slots = MY_LINKS.map(l => Object.assign({ source: 'file' }, l)).concat(MY_LINKS_ENV);
+    const fileSlots = MY_LINKS.map(l => Object.assign({ source: 'file' }, l));
+    let slots = fileSlots.concat(MY_LINKS_ENV);
     if (Array.isArray(extraLinks) && extraLinks.length){
         const t = extraType || type;
         const reqSlots = extraLinks.map((l, i) => {
             if (typeof l === 'string')
-                return { url: l, type: t, name: 'bot-link-' + (i + 1), source: 'request' };
-            return (l && l.url) ? Object.assign({ source: 'request', type: t }, l) : null;
+                return { url: l, type: t, name: hostnameName(l, 'bot-link-' + (i + 1)), source: 'request' };
+            return (l && l.url) ? Object.assign({ source: 'request', type: t }, l,
+                        { name: l.name || hostnameName(l.url, 'bot-link-' + (i + 1)) }) : null;
         }).filter(Boolean);
-        slots = reqSlots.concat(slots);          /* per-request links lead */
+        /* v4.6: per-request links still LEAD the search order — but a
+         * request slot whose URL is already a file slot is dropped in
+         * favour of the file slot (same site, same search, and the real
+         * name like "YonaYethuu (SA HD Videos)" survives for the lists). */
+        const fileUrls = new Set(fileSlots
+            .filter(l => String(l.type || 'image') === t)
+            .map(l => String(l.url || '')));
+        slots = reqSlots.filter(l => !fileUrls.has(String(l.url || ''))).concat(slots);
     }
     const seenUrls = new Set();
     return slots
@@ -119,19 +136,69 @@ function sortSlotsByFileOrder(slots, type){
  * matches the file slot number OR the /video-sites list position —
  * never a URL substring (IPs/ports would false-match). Returns
  * { slots, available } — available = the enabled choices for errors. */
+/* v4.6: word similarity — typos still find the site
+ * ("yonalethu" ≈ "yonayethuu", 0.8 similarity → matches). */
+function levenshtein(a, b){
+    const m = a.length, n = b.length;
+    let prev = new Array(n + 1).fill(0).map((_, i) => i);
+    for (let i = 1; i <= m; i++){
+        const cur = [i];
+        for (let j = 1; j <= n; j++){
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        prev = cur;
+    }
+    return prev[n];
+}
+function similarity(a, b){
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+}
+
 function filterVideoSlots(slots, site){
-    const available = slots.map(s => ({ slot: s.slot, name: s.name || s.url, url: s.url }));
+    /* v4.6: the user-facing list is DEDUPED by URL (the bot forwards its
+     * whole registry, so raw slots had 100+ near-duplicates), named after
+     * the hostname when unnamed, and numbered by LIST POSITION — the
+     * same numbers /video-sites shows, so site:<n> always picks what the
+     * user actually saw. */
+    const seen = new Set(); const available = [];
+    for (const s of slots){
+        const key = String(s.url || '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        available.push({ pick: available.length + 1, slot: s.slot, name: s.name || s.url, url: s.url });
+    }
     if (!site) return { slots, available };
     const pick = String(site).trim().toLowerCase();
     if (!pick) return { slots, available };
     if (/^\d+$/.test(pick)) {
         const num = parseInt(pick, 10);
-        return { slots: slots.filter((s, i) => Number(s.slot) === num || (i + 1) === num), available };
+        const byPick = available[num - 1];
+        return { slots: slots.filter(s => Number(s.slot) === num || (byPick && String(s.url) === String(byPick.url))), available };
     }
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const p = norm(pick);
+    if (!p) return { slots: [], available };
     const matched = slots.filter(s =>
-        String(s.name || '').toLowerCase().includes(pick) ||
-        String(s.url || '').toLowerCase().includes(pick));
-    return { slots: matched, available };
+        norm(s.name).includes(p) || String(s.url || '').toLowerCase().includes(pick));
+    if (matched.length) return { slots: matched, available };
+    /* v4.6 FUZZY FALLBACK: no exact hit → score the pick against every
+     * site name and hostname; best ≥ 0.6 wins ("yonalethu" → YonaYethuu).
+     * The TLD is stripped first — "yona-yethuu.co.za" must score like
+     * "yonayethuu", not drown in "coza" noise. */
+    let best = null, bestScore = 0;
+    for (const a of available){
+        const host = hostnameName(a.url, '').replace(/\.[a-z]{2,7}(\.[a-z]{2,7})?$/i, '');
+        for (const cand of [a.name, host]){
+            const sim = similarity(p, norm(cand));
+            if (sim > bestScore){ bestScore = sim; best = a; }
+        }
+    }
+    if (best && bestScore >= 0.6)
+        return { slots: slots.filter(s => String(s.url) === String(best.url)), available,
+                 fuzzy: { picked: best.name, score: Math.round(bestScore * 100) / 100 } };
+    return { slots: [], available };
 }
 
 // Try every enabled custom link of `type`; returns an array of direct
@@ -225,7 +292,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '4.5.0',
+        version: '4.6.0',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         tempSizeMB: Number(stats.totalSizeMB) || 0,
@@ -264,7 +331,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '4.5.0',
+        version: '4.6.0',
         howTo: 'MYLINKS-ONLY (zero built-in sites). THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Types: image, gif, video, music. {query} template optional, enabled:false switches a slot off. A dead slot never breaks a search.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -280,7 +347,7 @@ app.get('/my-links', (req, res) => {
 // DISABLED and Render went to sleep. Root and /ping now answer a tiny
 // JSON (also fine for HEAD requests — no big output ever).
 app.get('/', (req, res) => {
-    res.json({ ok: true, service: 'intelligent-scraper', version: '4.5.0', hint: 'POST /search /video /video-ranked /video-resolve /music /download · GET /my-links /video-sites /health' });
+    res.json({ ok: true, service: 'intelligent-scraper', version: '4.6.0', hint: 'POST /search /video /video-ranked /video-resolve /music /download · GET /my-links /video-sites /health' });
 });
 app.get('/ping', (req, res) => {
     res.json({ ok: true, ts: Date.now() });
@@ -381,7 +448,7 @@ app.post('/search', dataApi, async (req, res) => {
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             hint: myUrls.length ? undefined : NO_SOURCES_HINT,
-            version: '4.5.0'
+            version: '4.6.0'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -416,7 +483,7 @@ app.post('/search-video', dataApi, async (req, res) => {
                 error: 'site "' + site + '" not found',
                 available: picked.available,
                 hint: 'Send one of the available names, or a slot number.',
-                version: '4.5.0'
+                version: '4.6.0'
             });
         }
         slots = picked.slots;
@@ -447,7 +514,7 @@ app.post('/search-video', dataApi, async (req, res) => {
             myLinks: videos.length,
             site: site || undefined,
             hint: videos.length ? undefined : NO_SOURCES_HINT,
-            version: '4.5.0'
+            version: '4.6.0'
         });
     } catch (e) {
         console.error('Video search error:', e);
@@ -483,7 +550,7 @@ app.post('/search-music', dataApi, async (req, res) => {
             count: music.length,
             myLinks: music.length,
             hint: music.length ? undefined : NO_SOURCES_HINT,
-            version: '4.5.0'
+            version: '4.6.0'
         });
     } catch (e) {
         console.error('Music search error:', e);
@@ -514,7 +581,7 @@ app.post('/search-lyrics', dataApi, async (req, res) => {
             lyrics: [],
             count: 0,
             hint: NO_SOURCES_HINT,
-            version: '4.5.0'
+            version: '4.6.0'
         });
     } catch (e) {
         console.error('Lyrics search error:', e);
@@ -625,7 +692,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             hint: myGifs.length ? undefined : NO_SOURCES_HINT,
-            version: '4.5.0'
+            version: '4.6.0'
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -651,7 +718,7 @@ app.post('/music', dataApi, async (req, res) => {
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'music')
             .map(l => ({ name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.5.0' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.6.0' });
         }
         console.log(`[music] ${slots.length} music slot(s) for: "${searchQuery}"`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -663,7 +730,7 @@ app.post('/music', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Music error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.5.0' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.6.0' });
     }
 });
 
@@ -689,18 +756,20 @@ app.post('/video', dataApi, async (req, res) => {
         let slots = sortSlotsByFileOrder(getMyLinks('video', Array.isArray(req.body?.myLinks) ? req.body.myLinks
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'video'), 'video');
         const picked = filterVideoSlots(slots, site);
+        if (site && picked.fuzzy) console.log(`[video] site "${site}" → fuzzy match "${picked.fuzzy.picked}" (${picked.fuzzy.score})`);
         if (site && !picked.slots.length) {
             console.log(`[video] site "${site}" not found — ${picked.available.length} available`);
             return res.status(404).json({
                 error: 'site "' + site + '" not found',
-                available: picked.available,
+                available: picked.available.slice(0, 25),
+                availableTotal: picked.available.length,
                 hint: 'Send one of the available names, or a slot number. !vidsites lists them.',
-                version: '4.5.0'
+                version: '4.6.0'
             });
         }
         slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.5.0' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.6.0' });
         }
         console.log(`[video] ${slots.length} video slot(s) for: "${searchQuery}"${site ? ' (site=' + site + ')' : ''} — order: ${slots.map(s => s.name).join(' → ')}`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -710,7 +779,7 @@ app.post('/video', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Video error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.5.0' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.6.0' });
     }
 });
 
@@ -733,7 +802,7 @@ app.post('/video-ranked', dataApi, async (req, res) => {
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'video'), 'video');
         const picked = filterVideoSlots(slots, site);
         if (site && !picked.slots.length) {
-            return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.5.0' });
+            return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.6.0' });
         }
         slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, relevance.searchTerms(searchQuery)) }));
         if (!slots.length) {
@@ -749,7 +818,7 @@ app.post('/video-ranked', dataApi, async (req, res) => {
         });
     } catch (e) {
         console.error('video-ranked error:', e.message);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.5.0' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.6.0' });
     }
 });
 
@@ -762,16 +831,16 @@ app.post('/video-resolve', dataApi, async (req, res) => {
     try {
         const url = String((req.body || {}).url || '').trim();
         if (!/^https?:\/\//i.test(url)) {
-            return res.status(400).json({ error: 'Body must be {"url": "https://…video page…"}', version: '4.5.0' });
+            return res.status(400).json({ error: 'Body must be {"url": "https://…video page…"}', version: '4.6.0' });
         }
         const baseUrl = req.protocol + '://' + req.get('host');
         const out = await media.resolveVideoPage(url, baseUrl, {});
         console.log(`[video-resolve] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
         return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: out.source, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes,
-            expiresInSeconds: 3600, version: '4.5.0' });
+            expiresInSeconds: 3600, version: '4.6.0' });
     } catch (e) {
         console.error('video-resolve error:', e.message);
-        res.status(404).json({ error: 'Not downloadable', message: e.message, version: '4.5.0' });
+        res.status(404).json({ error: 'Not downloadable', message: e.message, version: '4.6.0' });
     }
 });
 
@@ -784,7 +853,7 @@ app.get('/video-sites', dataApi, (req, res) => {
         success: true,
         defaultFirst: slots.length ? slots[0].name : null,
         sites: slots.map((s, i) => ({ pick: i + 1, slot: s.slot, name: s.name || s.url, url: s.url })),
-        version: '4.5.0'
+        version: '4.6.0'
     });
 });
 

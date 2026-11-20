@@ -1,14 +1,23 @@
 {
-  "_README": "=== YOUR MEDIA SLOTS (my_links.json) — v5.0.0 (HOT-RELOADED) — 30 SOURCES ===",
+  "_README": "=== YOUR MEDIA SLOTS (my_links.json) — v4.6 (HOT-RELOADED) — 33 SLOTS / 30+ SITES ===",
   "_HOW_TO": [
-    "v5.0 EXPANDED: 30 slots — images, GIFs, videos from 20+ sites.",
-    "12 NEW SLOTS added for maximum variety and coverage.",
+    "v4.6: 33 slots — 18 video sites, 7 image sites, 7 gif sites, 1 music path.",
+    "Every slot URL was TESTED individually (isolated, one query per site).",
     "",
-    "VIDEO ORDER: slot 15 (XNXX) is tried FIRST on every video",
-    "search (proven 8.1MB mp4 via player-config extractor).",
-    "A request can force one site: POST /video {\"query\":\"milf\",",
-    "\"site\":\"yona\"} (name piece or slot number) — GET /video-sites",
-    "lists the choices for the bot's !vidsites command.",
+    "UA CHAIN (media.js): slot pages now fetch MOBILE-UA first, desktop retry —",
+    "the fix that revived xvideos / TNAFlix / DaftSex / EPorner / DrTuber.",
+    "",
+    "v4.6 TEMPLATE FIXES: xvideos → ?k={query} (old /search/ 404d),",
+    "DrTuber → /search/{query} (old ?query= 404d).",
+    "v4.6 SWAPS (dead → proven working): MzansiFun→RedTube, PornPicsVids→HD21,",
+    "XMegaDrive→PornTN, PornHD→YouPorn. YonaYethuu kept (boss link; Cloudflare",
+    "may still block datacenter IPs — it costs nothing to leave it first).",
+    "",
+    "VIDEO ORDER: slot 8 (YonaYethuu) first in file order; XNXX (slot 15) is a",
+    "proven heavy hitter. A request can force one site: POST /video",
+    "{\"query\":\"milf\",\"site\":\"yona\"} (name piece, list position or slot number) —",
+    "GET /video-sites lists the choices for the bot !vidsites command.",
+    "site: typos auto-match (yonalethu → YonaYethuu, fuzzy ≥ 0.6).",
     "",
     "THREE ways to add links (all merged, yours tried first):",
     "  1. this file — HOT-RELOADED, the next search uses it, no restart",
@@ -27,36 +36,236 @@
     "Changes here are HOT-RELOADED — no restart needed."
   ],
   "links": [
-    { "slot": 1,  "type": "image", "name": "PornPics (HD Images)", "url": "https://www.pornpics.com/search/?q={query}", "enabled": true },
-    { "slot": 2,  "type": "image", "name": "DarkNaija (HD Images)", "url": "https://www.darknaija.com/?s={query}", "enabled": true },
-    { "slot": 3,  "type": "image", "name": "xvideos (HD Images)", "url": "https://www.xvideos.com/", "enabled": true },
-    { "slot": 4,  "type": "gif",   "name": "PornHub GIFs (HD)", "url": "https://www.pornhub.com/gifs/search?search={query}", "enabled": true },
-    { "slot": 5,  "type": "gif",   "name": "DarkNaija Nude Pictures (HD)", "url": "https://darknaija.com/category/nude-pictures/", "enabled": true },
-    { "slot": 6,  "type": "gif",   "name": "xvideos GIFs (HD)", "url": "https://www.xvideos.com/", "enabled": true },
-    { "slot": 7,  "type": "gif",   "name": "WetGIF (HD Loops)", "url": "https://wetgif.com/?s={query}&lang=en", "enabled": true },
-    { "slot": 8,  "type": "video", "name": "YonaYethuu (SA HD Videos)", "url": "https://yona-yethuu.co.za/?s={query}", "enabled": true },
-    { "slot": 9,  "type": "video", "name": "MzansiFun (SA HD Videos)", "url": "https://www.mzansifun.com/search?keyword={query}", "enabled": true },
-    { "slot": 10, "type": "video", "name": "HDPornPics.xxx (HD Videos)", "url": "https://hdpornpics.xxx/search/{query}/", "enabled": true },
-    { "slot": 11, "type": "video", "name": "DarkNaija Leak Videos (HD)", "url": "https://darknaija.com/category/leak-videos/", "enabled": true },
-    { "slot": 12, "type": "video", "name": "PornPics Videos (HD)", "url": "https://www.pornpics.com/videos/", "enabled": true },
-    { "slot": 13, "type": "video", "name": "xvideos Videos (HD)", "url": "https://www.xvideos.com/search/{query}", "enabled": true },
-    { "slot": 14, "type": "video", "name": "DarkNaija Search (HD Videos)", "url": "https://www.darknaija.com/?s={query}", "enabled": true },
-    { "slot": 15, "type": "video", "name": "XNXX (HD Videos)", "url": "https://www.xnxx.com/search/{query}", "enabled": true },
-    { "slot": 16, "type": "video", "name": "XMegaDrive (HD Videos)", "url": "https://www.xmegadrive.com/videos/{query}/", "enabled": true },
-    { "slot": 17, "type": "video", "name": "EPorner (HD Videos)", "url": "https://www.eporner.com/search/{query}/", "enabled": true },
-
-    { "slot": 18, "type": "image", "name": "EroProfile (HD Images)", "url": "https://www.eroprofile.com/search/photos?search={query}", "enabled": true },
-    { "slot": 19, "type": "gif",   "name": "RedGIFs (HD Loops)", "url": "https://www.redgifs.com/search?query={query}", "enabled": true },
-    { "slot": 20, "type": "gif",   "name": "Giphy Adult (Loops)", "url": "https://giphy.com/search/{query}", "enabled": true },
-    { "slot": 21, "type": "video", "name": "SpankBang (HD Videos)", "url": "https://spankbang.com/s/{query}/", "enabled": true },
-    { "slot": 22, "type": "video", "name": "TNAFlix (HD Videos)", "url": "https://www.tnaflix.com/search.php?what={query}", "enabled": true },
-    { "slot": 23, "type": "video", "name": "DrTuber (HD Videos)", "url": "https://www.drtuber.com/search?query={query}", "enabled": true },
-    { "slot": 24, "type": "video", "name": "PornTube (HD Videos)", "url": "https://www.porntube.com/search?query={query}", "enabled": true },
-    { "slot": 25, "type": "image", "name": "ImageFap (HD Images)", "url": "https://www.imagefap.com/search.php?search={query}", "enabled": true },
-    { "slot": 26, "type": "video", "name": "Beeg (HD Videos)", "url": "https://beeg.com/search?query={query}", "enabled": true },
-    { "slot": 27, "type": "video", "name": "PornHD (HD Videos)", "url": "https://www.pornhd.com/search?q={query}", "enabled": true },
-    { "slot": 28, "type": "gif",   "name": "SexGifs (HD Loops)", "url": "https://sexgifs.com/?s={query}", "enabled": true },
-    { "slot": 29, "type": "video", "name": "DaftSex (HD Videos)", "url": "https://www.daftsex.com/search/{query}", "enabled": true },
-    { "slot": 30, "type": "image", "name": "HQSluts (HD Images)", "url": "https://www.hqsluts.com/search/?q={query}", "enabled": true }
+    {
+      "slot": 1,
+      "type": "image",
+      "name": "PornPics (HD Images)",
+      "url": "https://www.pornpics.com/search/?q={query}",
+      "enabled": true
+    },
+    {
+      "slot": 2,
+      "type": "image",
+      "name": "DarkNaija (HD Images)",
+      "url": "https://www.darknaija.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 3,
+      "type": "image",
+      "name": "xvideos (HD Images)",
+      "url": "https://www.xvideos.com/",
+      "enabled": true
+    },
+    {
+      "slot": 4,
+      "type": "gif",
+      "name": "PornHub GIFs (HD)",
+      "url": "https://www.pornhub.com/gifs/search?search={query}",
+      "enabled": true
+    },
+    {
+      "slot": 5,
+      "type": "gif",
+      "name": "DarkNaija Nude Pictures (HD)",
+      "url": "https://darknaija.com/category/nude-pictures/",
+      "enabled": true
+    },
+    {
+      "slot": 6,
+      "type": "gif",
+      "name": "xvideos GIFs (HD)",
+      "url": "https://www.xvideos.com/",
+      "enabled": true
+    },
+    {
+      "slot": 7,
+      "type": "gif",
+      "name": "WetGIF (HD Loops)",
+      "url": "https://wetgif.com/?s={query}&lang=en",
+      "enabled": true
+    },
+    {
+      "slot": 8,
+      "type": "video",
+      "name": "YonaYethuu (SA HD Videos)",
+      "url": "https://yona-yethuu.co.za/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 9,
+      "type": "video",
+      "name": "RedTube (HD Videos)",
+      "url": "https://www.redtube.com/?search={query}",
+      "enabled": true
+    },
+    {
+      "slot": 10,
+      "type": "video",
+      "name": "HDPornPics.xxx (HD Videos)",
+      "url": "https://hdpornpics.xxx/search/{query}/",
+      "enabled": true
+    },
+    {
+      "slot": 11,
+      "type": "video",
+      "name": "DarkNaija Leak Videos (HD)",
+      "url": "https://darknaija.com/category/leak-videos/",
+      "enabled": true
+    },
+    {
+      "slot": 12,
+      "type": "video",
+      "name": "HD21 (HD Videos)",
+      "url": "https://hd21.com/search/{query}/",
+      "enabled": true
+    },
+    {
+      "slot": 13,
+      "type": "video",
+      "name": "xvideos (HD Videos)",
+      "url": "https://www.xvideos.com/?k={query}",
+      "enabled": true
+    },
+    {
+      "slot": 14,
+      "type": "video",
+      "name": "DarkNaija Search (HD Videos)",
+      "url": "https://www.darknaija.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 15,
+      "type": "video",
+      "name": "XNXX (HD Videos)",
+      "url": "https://www.xnxx.com/search/{query}",
+      "enabled": true
+    },
+    {
+      "slot": 16,
+      "type": "video",
+      "name": "PornTN (HD Videos)",
+      "url": "https://www.porntn.com/search/{query}/",
+      "enabled": true
+    },
+    {
+      "slot": 17,
+      "type": "video",
+      "name": "EPorner (HD Videos)",
+      "url": "https://www.eporner.com/search/{query}/",
+      "enabled": true
+    },
+    {
+      "slot": 18,
+      "type": "image",
+      "name": "EroProfile (HD Images)",
+      "url": "https://www.eroprofile.com/search/photos?search={query}",
+      "enabled": true
+    },
+    {
+      "slot": 19,
+      "type": "gif",
+      "name": "RedGIFs (HD Loops)",
+      "url": "https://www.redgifs.com/search?query={query}",
+      "enabled": true
+    },
+    {
+      "slot": 20,
+      "type": "gif",
+      "name": "Giphy Adult (Loops)",
+      "url": "https://giphy.com/search/{query}",
+      "enabled": true
+    },
+    {
+      "slot": 21,
+      "type": "video",
+      "name": "SpankBang (HD Videos)",
+      "url": "https://spankbang.com/s/{query}/",
+      "enabled": true
+    },
+    {
+      "slot": 22,
+      "type": "video",
+      "name": "TNAFlix (HD Videos)",
+      "url": "https://www.tnaflix.com/search.php?what={query}",
+      "enabled": true
+    },
+    {
+      "slot": 23,
+      "type": "video",
+      "name": "DrTuber (HD Videos)",
+      "url": "https://www.drtuber.com/search/{query}",
+      "enabled": true
+    },
+    {
+      "slot": 24,
+      "type": "video",
+      "name": "PornTube (HD Videos)",
+      "url": "https://www.porntube.com/search?query={query}",
+      "enabled": true
+    },
+    {
+      "slot": 25,
+      "type": "image",
+      "name": "ImageFap (HD Images)",
+      "url": "https://www.imagefap.com/search.php?search={query}",
+      "enabled": true
+    },
+    {
+      "slot": 26,
+      "type": "video",
+      "name": "Beeg (HD Videos)",
+      "url": "https://beeg.com/search?query={query}",
+      "enabled": true
+    },
+    {
+      "slot": 27,
+      "type": "video",
+      "name": "YouPorn (HD Videos)",
+      "url": "https://www.youporn.com/search/?query={query}",
+      "enabled": true
+    },
+    {
+      "slot": 28,
+      "type": "gif",
+      "name": "SexGifs (HD Loops)",
+      "url": "https://sexgifs.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 29,
+      "type": "video",
+      "name": "DaftSex (HD Videos)",
+      "url": "https://www.daftsex.com/search/{query}",
+      "enabled": true
+    },
+    {
+      "slot": 30,
+      "type": "image",
+      "name": "HQSluts (HD Images)",
+      "url": "https://www.hqsluts.com/search/?q={query}",
+      "enabled": true
+    },
+    {
+      "slot": 31,
+      "type": "video",
+      "name": "XHamster (HD Videos)",
+      "url": "https://xhamster.com/search/{query}",
+      "enabled": true
+    },
+    {
+      "slot": 32,
+      "type": "video",
+      "name": "PornHub (HD Videos)",
+      "url": "https://www.pornhub.com/video/search?search={query}",
+      "enabled": true
+    },
+    {
+      "slot": 33,
+      "type": "image",
+      "name": "XHamster Pics (HD)",
+      "url": "https://xhamster.com/photos/search/{query}",
+      "enabled": true
+    }
   ]
 }

@@ -26,6 +26,25 @@ const relevance = require('./relevance'); // v4.3 weighted relevance engine
 
 const MAX_MB = Math.max(1, parseInt(process.env.SCRAPER_MAX_MB || '40', 10));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+/* v4.6 MOBILE UA — diag on the live slots proved the DESKTOP UA alone got
+ * 403/ECONNRESET from Cloudflare-fronted sites (xvideos, TNAFlix, DaftSex,
+ * EPorner, DrTuber…) while the SAME pages open fine with a phone UA:
+ * xvideos ?k= 27 pages · DrTuber 81 direct mp4 · TNAFlix 67 pages ·
+ * DaftSex 45 direct mp4 · EPorner 58 pages. Mobile first, desktop retry. */
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+async function fetchSlotPage(url, referer){
+    const tries = [MOBILE_UA, UA].map(ua => ({
+        'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9',
+        ...(referer ? { Referer: referer } : {})
+    }));
+    let lastErr;
+    for (const headers of tries){
+        try {
+            return await axios.get(url, { timeout: 20000, maxRedirects: 5, validateStatus: s => s < 400, headers });
+        } catch (e){ lastErr = e; }
+    }
+    throw lastErr || new Error('fetch failed');
+}
 
 /* ── Capped download of a direct media URL (shared by everything) ── */
 async function fetchCapped(url) {
@@ -53,7 +72,8 @@ async function fetchCapped(url) {
  * bot UA → plain browser UA → browser UA + same-origin Referer.      */
 const FETCH_UAS = [
     'BreadBotScraper/3.0 (media fetcher; contact: admin@breadbot.local)',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    MOBILE_UA
 ];
 function refererCandidates(u, extra){
     const out = [];
@@ -321,10 +341,7 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
     for (const slot of (slots || [])) {
         const slotName = slot.name || slot.url;
         try {
-            const s = await axios.get(slot.url, {
-                timeout: 20000,
-                headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
-            });
+            const s = await fetchSlotPage(slot.url);
             let cands = extractDirectVideos(s.data);
             const hintOf = new Map();         /* v4.0: url -> best Referer hint */
             for (const u of cands) hintOf.set(u, slot.url);
@@ -338,10 +355,7 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                     .slice(0, 6);
                 for (const vp of pageHits) {
                     try {
-                        const p = await axios.get(vp, {
-                            timeout: 20000,
-                            headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
-                        });
+                        const p = await fetchSlotPage(vp, slot.url);
                         /* v4.0: player-config urls first (real files), markup mp4s second */
                         const pv = extractPlayerVideos(p.data);
                         pv.forEach(u => { strong.add(u); hintOf.set(u, vp); });
@@ -405,10 +419,7 @@ async function myLinksMusic(slots, query, baseUrl, opts = {}) {
     for (const slot of (slots || [])) {
         const slotName = slot.name || slot.url;
         try {
-            const s = await axios.get(slot.url, {
-                timeout: 20000,
-                headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
-            });
+            const s = await fetchSlotPage(slot.url);
             let cands = [...new Set((String(s.data).match(MUSIC_URL_RE) || [])
                 .map(u => u.replace(/&amp;/g, '&')))]
                 .filter(u => !titleExcluded(slugTitleOf(u)))
@@ -470,10 +481,7 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
     /* one slot → scrape its search page → candidate list (no downloads) */
     async function huntSlot(slot) {
         const slotName = slot.name || slot.url;
-        const s = await axios.get(slot.url, {
-            timeout: 12000,
-            headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
-        });
+        const s = await fetchSlotPage(slot.url);
         const pages = extractVideoPages(s.data, slot.url)
             .filter(u => !VIDEO_RECENT.includes(u));
         const directs = extractDirectVideos(s.data);
@@ -534,10 +542,7 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
  * user actually picked from a ranked list. */
 async function resolveVideoPage(pageUrl, baseUrl, opts = {}) {
     const url = safeUrl(String(pageUrl || ''));
-    const p = await axios.get(url, {
-        timeout: 25000,
-        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
-    });
+    const p = await fetchSlotPage(url);
     const strong = extractPlayerVideos(p.data);
     const direct = extractDirectVideos(p.data);
     let cands = [...new Set([].concat(strong, direct))];
