@@ -292,7 +292,7 @@ app.get('/status', (req, res) => {
     res.json({
         status: 'ok',
         service: 'intelligent-scraper',
-        version: '4.7.1',
+        version: '4.7.3',
         uptime: process.uptime(),
         tempFiles: stats.fileCount,
         tempSizeMB: Number(stats.totalSizeMB) || 0,
@@ -331,7 +331,7 @@ app.get('/my-links', (req, res) => {
     const diag = (url) => MY_LINK_DIAG.get(String(url)) || null;
     res.json({
         success: true,
-        version: '4.7.1',
+        version: '4.7.3',
         howTo: 'MYLINKS-ONLY (zero built-in sites). THREE ways: (1) edit my_links.json — HOT-reloaded, next search uses it, no restart; (2) set MYLINKS env var "url1, url2" on this service OR on the bot (the bot forwards its own MYLINKS with every search); (3) POST /search {"myLinks":["https://..."]}. Types: image, gif, video, music. {query} template optional, enabled:false switches a slot off. A dead slot never breaks a search.',
         loaded: MY_LINKS.length,
         enabled: MY_LINKS.filter(l => l.enabled !== false).length,
@@ -347,7 +347,7 @@ app.get('/my-links', (req, res) => {
 // DISABLED and Render went to sleep. Root and /ping now answer a tiny
 // JSON (also fine for HEAD requests — no big output ever).
 app.get('/', (req, res) => {
-    res.json({ ok: true, service: 'intelligent-scraper', version: '4.7.1', hint: 'POST /search /video /video-ranked /video-resolve /music /download · GET /my-links /video-sites /health' });
+    res.json({ ok: true, service: 'intelligent-scraper', version: '4.7.3', hint: 'POST /search /video /video-ranked /video-resolve /music /download · GET /my-links /video-sites /health' });
 });
 app.get('/ping', (req, res) => {
     res.json({ ok: true, ts: Date.now() });
@@ -448,7 +448,7 @@ app.post('/search', dataApi, async (req, res) => {
             myLinks: myUrls.length,
             myLinksFirst: myUrls.length > 0,
             hint: myUrls.length ? undefined : NO_SOURCES_HINT,
-            version: '4.7.1'
+            version: '4.7.3'
         });
     } catch (e) {
         console.error('Image search error:', e);
@@ -483,7 +483,7 @@ app.post('/search-video', dataApi, async (req, res) => {
                 error: 'site "' + site + '" not found',
                 available: picked.available,
                 hint: 'Send one of the available names, or a slot number.',
-                version: '4.7.1'
+                version: '4.7.3'
             });
         }
         slots = picked.slots;
@@ -514,7 +514,7 @@ app.post('/search-video', dataApi, async (req, res) => {
             myLinks: videos.length,
             site: site || undefined,
             hint: videos.length ? undefined : NO_SOURCES_HINT,
-            version: '4.7.1'
+            version: '4.7.3'
         });
     } catch (e) {
         console.error('Video search error:', e);
@@ -550,7 +550,7 @@ app.post('/search-music', dataApi, async (req, res) => {
             count: music.length,
             myLinks: music.length,
             hint: music.length ? undefined : NO_SOURCES_HINT,
-            version: '4.7.1'
+            version: '4.7.3'
         });
     } catch (e) {
         console.error('Music search error:', e);
@@ -581,7 +581,7 @@ app.post('/search-lyrics', dataApi, async (req, res) => {
             lyrics: [],
             count: 0,
             hint: NO_SOURCES_HINT,
-            version: '4.7.1'
+            version: '4.7.3'
         });
     } catch (e) {
         console.error('Lyrics search error:', e);
@@ -692,7 +692,7 @@ app.get('/gif', dataApi, async (req, res) => {
             myLinks: myGifs.length,
             myLinksFirst: myGifs.length > 0,
             hint: myGifs.length ? undefined : NO_SOURCES_HINT,
-            version: '4.7.1'
+            version: '4.7.3'
         });
     } catch (e) {
         console.error('GIF search error:', e);
@@ -718,7 +718,7 @@ app.post('/music', dataApi, async (req, res) => {
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'music')
             .map(l => ({ name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.7.1' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.7.3' });
         }
         console.log(`[music] ${slots.length} music slot(s) for: "${searchQuery}"`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -730,7 +730,7 @@ app.post('/music', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Music error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.1' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.3' });
     }
 });
 
@@ -764,12 +764,12 @@ app.post('/video', dataApi, async (req, res) => {
                 available: picked.available.slice(0, 25),
                 availableTotal: picked.available.length,
                 hint: 'Send one of the available names, or a slot number. !vidsites lists them.',
-                version: '4.7.1'
+                version: '4.7.3'
             });
         }
         slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, searchQuery) }));
         if (!slots.length) {
-            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.7.1' });
+            return res.status(404).json({ error: 'No sources', message: NO_SOURCES_HINT, hint: NO_SOURCES_HINT, version: '4.7.3' });
         }
         console.log(`[video] ${slots.length} video slot(s) for: "${searchQuery}"${site ? ' (site=' + site + ')' : ''} — order: ${slots.map(s => s.name).join(' → ')}`);
         const baseUrl = req.protocol + '://' + req.get('host');
@@ -779,7 +779,7 @@ app.post('/video', dataApi, async (req, res) => {
             expiresInSeconds: 3600, linkLifetime: 'temp copy — swept after 1h, 100 items, or service restart. Download it or copy it into your own storage.' });
     } catch (e) {
         console.error('Video error:', e);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.1' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.3' });
     }
 });
 
@@ -802,7 +802,7 @@ app.post('/video-ranked', dataApi, async (req, res) => {
             : (req.body?.myLinks ? [req.body.myLinks] : []), 'video'), 'video');
         const picked = filterVideoSlots(slots, site);
         if (site && !picked.slots.length) {
-            return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.7.1' });
+            return res.status(404).json({ error: 'site "' + site + '" not found', available: picked.available, version: '4.7.3' });
         }
         slots = picked.slots.map(l => ({ slot: l.slot, name: l.name || l.url, url: myLinkUrl(l, relevance.searchTerms(searchQuery)) }));
         if (!slots.length) {
@@ -818,7 +818,7 @@ app.post('/video-ranked', dataApi, async (req, res) => {
         });
     } catch (e) {
         console.error('video-ranked error:', e.message);
-        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.1' });
+        res.status(404).json({ error: 'No results', message: e.message, hint: NO_SOURCES_HINT, version: '4.7.3' });
     }
 });
 
@@ -831,16 +831,16 @@ app.post('/video-resolve', dataApi, async (req, res) => {
     try {
         const url = String((req.body || {}).url || '').trim();
         if (!/^https?:\/\//i.test(url)) {
-            return res.status(400).json({ error: 'Body must be {"url": "https://…video page…"}', version: '4.7.1' });
+            return res.status(400).json({ error: 'Body must be {"url": "https://…video page…"}', version: '4.7.3' });
         }
         const baseUrl = req.protocol + '://' + req.get('host');
         const out = await media.resolveVideoPage(url, baseUrl, {});
         console.log(`[video-resolve] OK: ${out.title} (${(out.sizeBytes / 1048576).toFixed(1)}MB)`);
         return res.json({ success: true, mediaUrl: out.mediaUrl, title: out.title, source: out.source, mimetype: out.mimetype, kind: 'video', sizeBytes: out.sizeBytes,
-            expiresInSeconds: 3600, version: '4.7.1' });
+            expiresInSeconds: 3600, version: '4.7.3' });
     } catch (e) {
         console.error('video-resolve error:', e.message);
-        res.status(404).json({ error: 'Not downloadable', message: e.message, version: '4.7.1' });
+        res.status(404).json({ error: 'Not downloadable', message: e.message, version: '4.7.3' });
     }
 });
 
@@ -853,7 +853,7 @@ app.get('/video-sites', dataApi, (req, res) => {
         success: true,
         defaultFirst: slots.length ? slots[0].name : null,
         sites: slots.map((s, i) => ({ pick: i + 1, slot: s.slot, name: s.name || s.url, url: s.url })),
-        version: '4.7.1'
+        version: '4.7.3'
     });
 });
 

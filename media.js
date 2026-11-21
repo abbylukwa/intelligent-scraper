@@ -540,8 +540,43 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
  * files) + direct mp4s, rank quality/relevance, download the first
  * that works under the cap. This is how the bot sends the video the
  * user actually picked from a ranked list. */
+/* ─── v4.7.3: TWITTER/X VIDEO — via the fxtwitter API ────────────────
+ * twitter.com and x.com hide video behind auth + HLS fragments; plain
+ * scraping never sees an mp4. fxtwitter (public embed-fix API) hands
+ * back the direct video.twimg.com files with no login and no rate
+ * drama. Pasting any x.com/<user>/status/<id> link into a download
+ * command now returns the actual mp4 file. */
+const TWITTER_RE = /^https?:\/\/(?:www\.|mobile\.|m\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,20})\/status\/(\d+)/i;
+async function resolveTwitterVideo(pageUrl, baseUrl) {
+    const m = TWITTER_RE.exec(String(pageUrl || ''));
+    if (!m) return null;
+    const r = await axios.get('https://api.fxtwitter.com/' + m[1] + '/status/' + m[2],
+        { timeout: 25000, validateStatus: () => true });
+    const t = r.data && r.data.tweet;
+    if (!t || r.status >= 400) throw new Error('fxtwitter: ' + ((r.data && r.data.error) || ('http ' + r.status)));
+    const vids = (t.media && t.media.videos) || [];
+    if (!vids.length) throw new Error('that tweet has no video');
+    /* fxtwitter exposes variant urls; prefer the declared-biggest */
+    const best = vids.slice().sort((a, b) => (b.size || 0) - (a.size || 0))[0];
+    let file = best.url;
+    if (!file) throw new Error('tweet video url missing');
+    const dl = await downloadVideoCandidate(file, '.mp4', 'https://twitter.com/');
+    const title = (((t.author && t.author.name) || 'X') + ' — ' + String(t.text || '').replace(/\s+/g, ' ').slice(0, 60)).trim();
+    return {
+        mediaUrl: baseUrl + '/temp/' + dl.id + dl.ext,
+        title: title,
+        mimetype: 'video/mp4',
+        kind: 'video',
+        sizeBytes: dl.buf.length,
+        source: pageUrl
+    };
+}
+
 async function resolveVideoPage(pageUrl, baseUrl, opts = {}) {
     const url = safeUrl(String(pageUrl || ''));
+    /* Twitter/X first — the generic path can never resolve those */
+    const tw = await resolveTwitterVideo(url, baseUrl).catch(() => null);
+    if (tw) return tw;
     const p = await fetchSlotPage(url);
     const strong = extractPlayerVideos(p.data);
     const direct = extractDirectVideos(p.data);
