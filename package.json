@@ -1,6 +1,6 @@
 {
   "name": "intelligent-scraper",
-  "version": "4.6.0",
+  "version": "4.7.1",
   "description": "intelligent-scraper 4.1 - MYLINKS-ONLY: my_links.json is the single source of truth (hot-reloaded slots: image/gif/video/music), site-picker on /video, zero built-in sites, per-slot diagnostics, SSRF-guarded, Node 18/20/22 compatible (p-limit@4 CJS)",
   "main": "server.js",
   "scripts": {
@@ -14,6 +14,7 @@
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
+    "cycletls": "^2.0.5",
     "express": "^4.18.2",
     "fs-extra": "^11.1.1",
     "p-limit": "^4.0.0"

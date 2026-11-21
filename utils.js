@@ -33,13 +33,193 @@ const USER_AGENTS = [
 ];
 
 async function fetchPage(url) {
+    return fetchHTMLHardened(url);
+}
+
+/* ─── v4.7 ANTI-BLOCK LADDER ──────────────────────────────────────────
+ * The boss: "the sites are denying the boys." Diagnosis: Render's
+ * datacenter IP range is PRE-FLAGGED by Cloudflare (tested from a clean
+ * sandbox IP — identical code cleared every site). Modern workaround
+ * ladder, every layer optional + graceful:
+ *   L0  axios with cached CF-clearance cookies (fast path)
+ *   L1  cycletls — Chrome TLS(JA3)+HTTP2 fingerprint impersonation
+ *   L2  FlareSolverr sidecar (FLARESOLVERR_URL) — real Chrome solves
+ *       the JS challenge; clearance cookies cached + replayed
+ *   L2.5 the BOT's stealth Chrome (STEALTH_FETCH_URL → its
+ *       /stealth-fetch endpoint) — yona-yethuu's "One moment, please"
+ *       challenge needs a real browser; the bot already ships one
+ *   L3  PROXY_URL (residential/mobile proxy) shifts the exit IP;
+ *       applied to cycletls + FlareSolverr, axios is skipped first
+ *       when a proxy is configured.
+ * Nothing costs money until the owner sets PROXY_URL / FLARESOLVERR_URL.
+ * cycletls missing? layer silently skips (scraper works as v4.6). */
+const CHROME_UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const CHROME_JA3 = '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513-21,4588-29-23-24,0';
+const CHROME_H2  = '1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p';
+/* v4.7.1: challenge shells that LOOK like HTML but are interstitials
+ * must never pass as a page — yona-yethuu served 11.9KB of
+ * "setTimeout(window.location.reload, 5000)" shell and the old
+ * signature list waved it through (that is how "404 most sites"
+ * looked from the bot). Also reject transport junk (cycletls returns
+ * Go error strings like "stream error: stream ID 1; PROTOCOL_ERROR"
+ * as a 200 body). */
+const BLOCKED_HTML_RE = /just a moment|one moment, please|cf-challenge|challenge-platform|__cf_chl|cf-browser-verification|attention required|access denied|checking your browser|perimeterx|px-captcha|queue-it\.net|window\.location\.reload\(\)|setTimeout\(function\(\)\{\s*window\.location\.reload|testcookie|ddos-guard|stream error:/i;
+
+/* A page is only GOOD when the status is OK, no blocked signature,
+ * and it carries a real payload (>300 chars). */
+function goodPage(status, html){
+    if (status >= 400) return false;
+    const h = String(html || '');
+    if (h.trim().length < 300) return false;
+    return !looksBlocked(status, h);
+}
+
+let _cyclePromise = null;
+let _cycleDead = false;
+async function cycleClient(){
+    if (_cycleDead || process.env.DISABLE_IMPERSONATION) return null;
     try {
-        url = safeUrl(url);                       // v4.1 SSRF guard
-        const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-        
+        if (!_cyclePromise){
+            const mod = require('cycletls');
+            _cyclePromise = mod().catch((e) => { _cyclePromise = null; throw e; });
+        }
+        return await _cyclePromise;
+    } catch (e) {
+        _cycleDead = true;                       // never spam-retry a broken install
+        console.error('ANTI-BLOCK: cycletls unavailable, ladder without L1:', e.message);
+        return null;
+    }
+}
+
+/* CF-clearance cookie cache per host — FlareSolverr wins it once, every
+ * later axios/cycletls request to that host replays it (fast path L0). */
+const CLEARANCE_TTL_MS = 6 * 60 * 60 * 1000;     // cf_clearance lives hours
+const clearanceByHost = new Map();               // host -> { cookie, ua, at }
+function storeClearance(host, cookies, ua){
+    try {
+        const jar = (cookies || []).map(c => `${c.name}=${c.value}`).filter(s => !s.endsWith('='));
+        if (!jar.length) return;
+        clearanceByHost.set(String(host).toLowerCase(), {
+            cookie: jar.join('; '), ua: ua || CHROME_UA, at: Date.now()
+        });
+        if (clearanceByHost.size > 60){          // bound the cache
+            const k = clearanceByHost.keys().next().value;
+            clearanceByHost.delete(k);
+        }
+    } catch (_e) { /* never break a fetch over cookie bookkeeping */ }
+}
+function clearanceFor(host){
+    const c = clearanceByHost.get(String(host || '').toLowerCase());
+    if (!c || Date.now() - c.at > CLEARANCE_TTL_MS) return null;
+    return c;
+}
+
+function looksBlocked(status, html){
+    if (status === 403 || status === 429 || status === 503) return true;
+    return BLOCKED_HTML_RE.test(String(html || '').slice(0, 6000));
+}
+
+async function fetchViaCycleTLS(url, extraHeaders = {}){
+    const client = await cycleClient();
+    if (!client) throw new Error('impersonation unavailable');
+    const u = new URL(url);
+    const clear = clearanceFor(u.host);
+    const ua = (clear && clear.ua) || CHROME_UA;
+    const resp = await client(url, {
+        ja3: CHROME_JA3,
+        http2Fingerprint: CHROME_H2,
+        userAgent: ua,
+        headerOrder: ['host','connection','user-agent','accept','accept-language','accept-encoding','sec-ch-ua','sec-ch-ua-mobile','sec-ch-ua-platform','sec-fetch-dest','sec-fetch-mode','sec-fetch-site','sec-fetch-user','upgrade-insecure-requests','cookie','referer'],
+        headers: Object.assign({
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'accept-language': 'en-US,en;q=0.9',
+            'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'none',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1'
+        }, (clear && clear.cookie) ? { 'cookie': clear.cookie } : {}, extraHeaders),
+        timeout: 25,
+        ...(process.env.PROXY_URL ? { proxy: process.env.PROXY_URL } : {})
+    }, 'get');
+    const html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
+    return { status: resp.status, html };
+}
+
+/* L2.5 — the bot's stealth Chrome. Same trust model as the owner's
+ * /admin routes (URL kept private) with an optional shared secret
+ * (STEALTH_FETCH_TOKEN here ↔ STEALTH_TOKEN on the bot). */
+async function fetchViaStealthService(url){
+    const base = process.env.STEALTH_FETCH_URL;
+    if (!base) throw new Error('stealth service not configured');
+    const r = await axios.post(String(base).replace(/\/+$/, ''), {
+        url: url
+    }, {
+        timeout: 90000,
+        validateStatus: () => true,
+        ...(process.env.STEALTH_FETCH_TOKEN ? { headers: { 'x-bb-token': process.env.STEALTH_FETCH_TOKEN } } : {})
+    });
+    const body = r.data || {};
+    if (!body.ok || typeof body.html !== 'string'){
+        throw new Error('stealth service failed: ' + (body.error || ('http ' + r.status)));
+    }
+    return { status: 200, html: body.html };
+}
+
+async function fetchViaFlareSolverr(url){
+    const base = process.env.FLARESOLVERR_URL;
+    if (!base) throw new Error('flaresolverr not configured');
+    const r = await axios.post(String(base).replace(/\/+$/, '') + '/v1', {
+        cmd: 'request.get',
+        url: url,
+        maxTimeout: 60000,
+        ...(process.env.PROXY_URL ? { proxy: { url: process.env.PROXY_URL } } : {})
+    }, { timeout: 75000, validateStatus: () => true });
+    const sol = r.data && r.data.solution;
+    if (!sol || typeof sol.response !== 'string'){
+        throw new Error('flaresolverr failed: ' + ((r.data && (r.data.message || r.data.status)) || ('http ' + r.status)));
+    }
+    try { storeClearance(new URL(url).host, sol.cookies || [], sol.userAgent); } catch (_e) {}
+    return { status: sol.status || 200, html: sol.response };
+}
+
+/* THE LADDER. Returns the HTML string or throws with a layer report. */
+async function fetchHTMLHardened(url) {
+    url = safeUrl(url);
+    const report = [];
+    const useProxy = !!process.env.PROXY_URL;
+
+    /* L3 shift: with a proxy configured the direct axios call from the
+     * flagged Render IP is wasted time — impersonation through the
+     * proxy goes first. */
+    if (useProxy){
+        try {
+            const r = await fetchViaCycleTLS(url);
+            if (goodPage(r.status, r.html)) return r.html;
+            report.push('cycletls ' + r.status);
+        } catch (e) { report.push('cycletls ' + e.message); }
+        try {
+            const r = await fetchViaFlareSolverr(url);
+            if (goodPage(r.status, r.html)) return r.html;
+            report.push('flare ' + r.status);
+        } catch (e) { report.push('flare ' + e.message); }
+        try {
+            const r = await fetchViaStealthService(url);
+            if (goodPage(r.status, r.html)) return r.html;
+            report.push('stealth ' + r.status);
+        } catch (e) { report.push('stealth ' + e.message); }
+    }
+
+    /* L0 — axios fast path (with any cached clearance cookie). */
+    try {
+        const u = new URL(url);
+        const clear = clearanceFor(u.host);
         const response = await axios.get(url, {
-            headers: {
-                'User-Agent': userAgent,
+            headers: Object.assign({
+                'User-Agent': USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
                 'Accept-Encoding': 'gzip, deflate, br',
@@ -50,17 +230,41 @@ async function fetchPage(url) {
                 'Sec-Fetch-Site': 'none',
                 'Sec-Fetch-User': '?1',
                 'Cache-Control': 'max-age=0'
-            },
+            }, (clear && clear.cookie) ? { 'Cookie': clear.cookie } : {}),
             timeout: 15000,
             maxRedirects: 5,
-            maxContentLength: 25 * 1024 * 1024   // v4.1: cap HTML pages at 25MB
+            maxContentLength: 25 * 1024 * 1024,   // v4.1: cap HTML pages at 25MB
+            validateStatus: () => true
         });
-        
-        return response.data;
-    } catch (error) {
-        console.error(`Failed to fetch ${url}:`, error.message);
-        throw error;
-    }
+        const html = typeof response.data === 'string' ? response.data : '';
+        if (goodPage(response.status, html)) return html;
+        report.push('axios ' + response.status);
+    } catch (error) { report.push('axios ' + error.message); }
+
+    /* L1 — Chrome TLS/HTTP2 fingerprint. */
+    try {
+        const r = await fetchViaCycleTLS(url);
+        if (goodPage(r.status, r.html)) return r.html;
+        report.push('cycletls ' + r.status);
+    } catch (e) { report.push('cycletls ' + e.message); }
+
+    /* L2 — real Chrome challenge solve (only when configured). */
+    try {
+        const r = await fetchViaFlareSolverr(url);
+        if (goodPage(r.status, r.html)) return r.html;
+        report.push('flare ' + r.status);
+    } catch (e) { report.push('flare ' + e.message); }
+
+    /* L2.5 — the bot's stealth Chrome (yona-yethuu class). */
+    try {
+        const r = await fetchViaStealthService(url);
+        if (goodPage(r.status, r.html)) return r.html;
+        report.push('stealth ' + r.status);
+    } catch (e) { report.push('stealth ' + e.message); }
+
+    const err = new Error('all fetch layers blocked — ' + report.join(' | '));
+    err.layers = report;
+    throw err;
 }
 
 const EXT_BY_MIME = {
@@ -273,6 +477,15 @@ function relevantGifs(urls, query){
 module.exports = {
     safeUrl,
     fetchPage,
+    fetchHTMLHardened,
+    fetchViaCycleTLS,
+    fetchViaFlareSolverr,
+    fetchViaStealthService,
+    looksBlocked,
+    goodPage,
+    storeClearance,
+    clearanceFor,
+    CHROME_UA,
     downloadImage,
     extractImageUrls,
     isJunkImageUrl,
