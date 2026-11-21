@@ -1,5 +1,5 @@
 {
-  "_README": "OWNER: abbylukwa. v4.7.2 rebuilt 2026-11-21 — every slot probe-tested live; dead domains removed; SpankBang disabled (hard 403); yona-yethuu needs the bot stealth layer (STEALTH_FETCH_URL).",
+  "_README": "OWNER: abbylukwa. v4.7.5 rebuilt 2026-11-21 — 20 video slots E2E-verified delivering; yona/mzansifun/mzansiporntube kept enabled (pages render via bot stealth Chrome; their stream hosts are CF-hardened, best-effort); dead/spam slots disabled.",
   "_HOW_TO": [
     "v4.6: 33 slots — 18 video sites, 7 image sites, 7 gif sites, 1 music path.",
     "Every slot URL was TESTED individually (isolated, one query per site).",
@@ -202,14 +202,14 @@
       "type": "video",
       "name": "MzansiTube co.za SA",
       "url": "https://mzansitube.co.za/?s={query}",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 25,
       "type": "video",
       "name": "SATube co.za SA",
       "url": "https://satube.co.za/?s={query}",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 26,
