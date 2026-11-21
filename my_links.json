@@ -429,13 +429,6 @@
    "enabled": true
   },
   {
-   "slot": 57,
-   "type": "video",
-   "name": "SA Query - XVideos",
-   "url": "https://www.xvideos.com/?k={query}",
-   "enabled": true
-  },
-  {
    "slot": 58,
    "type": "video",
    "name": "SA Teen - XNXX",
@@ -499,34 +492,6 @@
    "enabled": true
   },
   {
-   "slot": 67,
-   "type": "video",
-   "name": "Deutsch - xHamster",
-   "url": "https://de.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
-   "slot": 68,
-   "type": "video",
-   "name": "Français - xHamster",
-   "url": "https://fr.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
-   "slot": 69,
-   "type": "video",
-   "name": "Español - xHamster",
-   "url": "https://es.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
-   "slot": 70,
-   "type": "video",
-   "name": "Italiano - xHamster",
-   "url": "https://it.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
    "slot": 71,
    "type": "video",
    "name": "Deutsch - XNXX",
@@ -541,13 +506,6 @@
    "enabled": true
   },
   {
-   "slot": 73,
-   "type": "video",
-   "name": "Deutsch Query - XVideos",
-   "url": "https://www.xvideos.com/?k={query}",
-   "enabled": true
-  },
-  {
    "slot": 74,
    "type": "video",
    "name": "Arab - XNXX",
@@ -555,24 +513,10 @@
    "enabled": true
   },
   {
-   "slot": 75,
-   "type": "video",
-   "name": "عربي - xHamster",
-   "url": "https://ar.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
    "slot": 76,
    "type": "video",
    "name": "Arab Search - EPorner",
    "url": "https://www.eporner.com/search/arab/",
-   "enabled": true
-  },
-  {
-   "slot": 77,
-   "type": "video",
-   "name": "عربي نصي - XNXX",
-   "url": "https://www.xnxx.com/search/{query}",
    "enabled": true
   },
   {
@@ -587,13 +531,6 @@
    "type": "video",
    "name": "日本 - xHamster",
    "url": "https://jp.xhamster.com/search/{query}",
-   "enabled": true
-  },
-  {
-   "slot": 80,
-   "type": "video",
-   "name": "Japanese Query - XNXX",
-   "url": "https://www.xnxx.com/search/{query}",
    "enabled": true
   },
   {

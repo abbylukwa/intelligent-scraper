@@ -278,7 +278,7 @@ async function tryMyLinks(query, type, extraLinks, opts = {}) {
              * (challenge rounds need more) — 60s with the same guard. */
             const html = await Promise.race([
                 utils.fetchPage(url),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000))
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 120000))
             ]);
             let urls = extractFrom(html);
             /* v4.7.7 APP-SHELL RENDER-THROUGH — JS-walled sites (beeg,
