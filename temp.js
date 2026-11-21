@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const TEMP_DIR = path.join(__dirname, 'temp');
-const MAX_AGE_MS = 3600000; // 1 hour
+const MAX_AGE_MS = 15 * 60 * 1000; // v4.7.6: 15 minutes (free-tier memory)
 const MAX_ITEMS = 100;
 
 fs.ensureDirSync(TEMP_DIR);
