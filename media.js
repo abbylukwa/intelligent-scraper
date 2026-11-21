@@ -39,7 +39,7 @@ const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (
  * search: axios → Chrome TLS impersonation → FlareSolverr → bot
  * stealth. Mobile-UA retries kept as the last resort for hosts that
  * 403 the ladder's desktop fingerprint. */
-const { fetchHTMLHardened, looksBlocked } = require('./utils');
+const { fetchHTMLHardened, looksBlocked, looksLikeAppShell, stealthFetchHTML } = require('./utils');
 async function fetchSlotPage(url, referer){
     try {
         const html = await fetchHTMLHardened(url);
@@ -462,6 +462,41 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                     (relevanceScore(b, words) - relevanceScore(a, words)) ||
                     (qualityScore(b) - qualityScore(a)) ||
                     (b.length - a.length));
+            /* v4.7.7 APP-SHELL RENDER-THROUGH — the download path too:
+             * JS-walled search pages (beeg…) yield "0 video links" even
+             * through the ladder, because the shell is not a block.
+             * Re-render the slot url through the stealth browser and
+             * walk the real markup (direct refs + page links, 1 level). */
+            if (!cands.length && looksLikeAppShell(s.data)){
+                console.log('[render-through] ' + slotName + ' — app-shell detected, re-rendering through stealth browser…');
+                try {
+                    const html2 = await stealthFetchHTML(slot.url);
+                    console.log('[render-through] ' + slotName + ' — got ' + Math.round(html2.length/1024) + 'KB rendered markup');
+                    const c2 = extractDirectVideos(html2);
+                    c2.forEach(u => hintOf.set(u, slot.url));
+                    cands.push(...c2);
+                    if (!c2.length){
+                        const p2 = extractVideoPages(html2, slot.url)
+                            .filter(u => !VIDEO_RECENT.includes(u))
+                            .sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words))
+                            .slice(0, 4);
+                        for (const vp of p2){
+                            try {
+                                const p = await fetchSlotPage(vp, slot.url);
+                                const pv = extractPlayerVideos(p.data);
+                                const dv = extractDirectVideos(p.data);
+                                pv.forEach(u => { strong.add(u); hintOf.set(u, vp); });
+                                dv.forEach(u => hintOf.set(u, vp));
+                                cands.push(...pv, ...dv);
+                                if (pv.length || dv.length) break;
+                            } catch (e3) { /* next page */ }
+                        }
+                    }
+                    if (cands.length) diag[slotName + ' (rendered)'] = cands.length;
+                } catch (e2) {
+                    errors.push(slotName + ': render-through: ' + e2.message);
+                }
+            }
             if (!cands.length) {
                 diag[slotName] = 0;
                 errors.push(slotName + ': 0 video links');

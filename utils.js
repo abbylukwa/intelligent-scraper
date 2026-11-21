@@ -65,6 +65,37 @@ const CHROME_H2  = '1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p';
  * as a 200 body). */
 const BLOCKED_HTML_RE = /just a moment|one moment, please|cf-challenge|challenge-platform|__cf_chl|cf-browser-verification|attention required|access denied|checking your browser|perimeterx|px-captcha|queue-it\.net|window\.location\.reload\(\)|setTimeout\(function\(\)\{\s*window\.location\.reload|testcookie|ddos-guard|stream error:/i;
 
+/* v4.7.7 APP-SHELL — pages that answer 200 with a real payload but are
+ * JavaScript-only frameworks (beeg, RedGIFs, SexGifs: the results are
+ * rendered client-side). They pass every blocked check, so the ladder
+ * stops at L0 and the extractor reads "0 media". Detection: SPA
+ * framework markers, or few/no <a href> with heavy <script>. */
+function looksLikeAppShell(html){
+    const h = String(html || '');
+    if (h.length < 300) return false;                /* challenge/junk is not an app-shell */
+    if (/__NEXT_DATA__|window\.__NUXT__|id=["']root["']|id=["']app["']|data-reactroot|ng-app=/.test(h)) return true;
+    const anchors = (h.match(/<a\s/gi) || []).length;
+    const scripts = (h.match(/<script/gi) || []).length;
+    return anchors < 8 && scripts >= 4;
+}
+
+/* v4.7.7 RENDER-THROUGH — stealth-ONLY fetch, used after a static fetch
+ * already returned an app-shell (the ladder's earlier layers ran and
+ * produced a shell, not a block). The bot's Chrome executes the JS and
+ * ships back the real markup. FlareSolverr renders JS too when set. */
+async function stealthFetchHTML(url){
+    url = safeUrl(url);
+    try {
+        const r = await fetchViaStealthService(url);
+        if (r.status < 400 && r.html && r.html.length > 300) return r.html;
+        throw new Error('stealth thin/failed (' + r.status + ')');
+    } catch (e) {
+        const r = await fetchViaFlareSolverr(url);
+        if (r.status < 400 && r.html && r.html.length > 300) return r.html;
+        throw new Error('render-through failed: ' + e.message);
+    }
+}
+
 /* A page is only GOOD when the status is OK, no blocked signature,
  * and it carries a real payload (>300 chars). */
 function goodPage(status, html){
@@ -495,6 +526,8 @@ module.exports = {
     fetchViaStealthService,
     looksBlocked,
     goodPage,
+    looksLikeAppShell,
+    stealthFetchHTML,
     storeClearance,
     clearanceFor,
     CHROME_UA,

@@ -204,8 +204,8 @@ function filterVideoSlots(slots, site){
 // Try every enabled custom link of `type`; returns an array of direct
 // media URLs found. A dead link NEVER breaks a search — each slot
 // fails independently, is skipped and logged.
-async function tryMyLinks(query, type, extraLinks) {
-    const slots = getMyLinks(type, extraLinks);
+async function tryMyLinks(query, type, extraLinks, opts = {}) {
+    const slots = (opts && opts.slots) || getMyLinks(type, extraLinks);
     if (!slots.length) return [];
     const found = [];
     await Promise.all(slots.map(async (link) => {
@@ -233,32 +233,58 @@ async function tryMyLinks(query, type, extraLinks) {
                 found.push(...clean);
                 return;
             }
+            /* v4.7.7: extraction as a closure — the SAME logic runs on
+             * the static HTML and again after a render-through. */
+            const extractFrom = (html) => {
+                let urls = [];
+                if (type === 'gif') {
+                    /* v3.1: gif slots also extract .mp4/.webm loops — blog
+                     * "gif" posts embed mp4 players, not .gif files. The bot
+                     * sends both as video, so nothing breaks downstream. */
+                    const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.(?:gif|mp4|webm)(?:\?[^\s"'<>\\]*)?/gi) || [];
+                    urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
+                    /* dedupe + rank on-topic slugs first (generic, no site logic) */
+                    urls = utils.relevantGifs(urls, query);
+                } else if (type === 'video' || type === 'music') {
+                    /* list-only mode (used by /search-video & /search-music):
+                     * direct media links straight off the page, no download */
+                    const re = type === 'video'
+                        ? /https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm)[^\s"'<>\\]*/gi
+                        : /https?:\/\/[^\s"'<>\\]+\.(?:mp3|m4a|ogg|wav|aac)(?:\?[^\s"'<>\\]*)?/gi;
+                    urls = [...new Set((String(html).match(re) || []).map(u => u.replace(/&amp;/g, '&')))];
+                } else {
+                    urls = utils.extractImageUrls(String(html), url);
+                    /* DAPI XML SLOTS: gelbooru-family dapi endpoints answer
+                     * static XML with full-res originals in file_url="…" —
+                     * no <img> tags, cheerio finds nothing. */
+                    if (!urls.length) urls = utils.extractDapiFileUrls(String(html));
+                }
+                return urls;
+            };
+            /* v4.7.4: the 15s race cut the hardened ladder off mid-run
+             * (challenge rounds need more) — 60s with the same guard. */
             const html = await Promise.race([
                 utils.fetchPage(url),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000))
             ]);
-            let urls = [];
-            if (type === 'gif') {
-                /* v3.1: gif slots also extract .mp4/.webm loops — blog
-                 * "gif" posts embed mp4 players, not .gif files. The bot
-                 * sends both as video, so nothing breaks downstream. */
-                const matches = String(html).match(/https?:\/\/[^"'\s<>\\]+\.(?:gif|mp4|webm)(?:\?[^\s"'<>\\]*)?/gi) || [];
-                urls = matches.filter(u => !/replace-me|example\.com/i.test(u));
-                /* dedupe + rank on-topic slugs first (generic, no site logic) */
-                urls = utils.relevantGifs(urls, query);
-            } else if (type === 'video' || type === 'music') {
-                /* list-only mode (used by /search-video & /search-music):
-                 * direct media links straight off the page, no download */
-                const re = type === 'video'
-                    ? /https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm)[^\s"'<>\\]*/gi
-                    : /https?:\/\/[^\s"'<>\\]+\.(?:mp3|m4a|ogg|wav|aac)(?:\?[^\s"'<>\\]*)?/gi;
-                urls = [...new Set((String(html).match(re) || []).map(u => u.replace(/&amp;/g, '&')))];
-            } else {
-                urls = await utils.extractImageUrls(String(html), url);
-                /* DAPI XML SLOTS: gelbooru-family dapi endpoints answer
-                 * static XML with full-res originals in file_url="…" —
-                 * no <img> tags, cheerio finds nothing. */
-                if (!urls.length) urls = utils.extractDapiFileUrls(String(html));
+            let urls = extractFrom(html);
+            /* v4.7.7 APP-SHELL RENDER-THROUGH — JS-walled sites (beeg,
+             * RedGIFs, SexGifs…) answer 200 with a framework shell that
+             * passes every blocked check — static extraction reads "0
+             * media". When the page looks like an SPA shell, re-render
+             * the SAME url through the stealth browser (JS executes)
+             * and extract once more. */
+            if (!urls.length && utils.looksLikeAppShell(html)){
+                try {
+                    const html2 = await Promise.race([
+                        utils.stealthFetchHTML(url),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('render timeout')), 240000))
+                    ]);
+                    urls = extractFrom(html2);
+                    if (urls.length) console.log(`MY LINKS: "${link.name || link.url}" → RENDERED through stealth browser → ${urls.length} ${type}(s)`);
+                } catch (e2) {
+                    console.log(`MY LINKS: "${link.name || link.url}" render-through failed: ${e2.message}`);
+                }
             }
             urls = [...new Set(urls)].slice(0, 30);
             diagRecord(String(link.url), urls.length, urls.length ? null : '0 media in static HTML (JS-walled?)');
@@ -394,9 +420,16 @@ app.post('/test-site', async (req, res) => {
         // Try a quick search on this site
         const kind = link.type || 'image';
         const endpoint = kind === 'video' ? '/video' : kind === 'gif' ? '/gif' : kind === 'music' ? '/music' : '/search';
-        const result = await axios.post(`http://localhost:${PORT}${endpoint}`, { query, site: String(slot) }, { timeout: 15000 });
+        const result = await axios.post(`http://localhost:${PORT}${endpoint}`, { query, site: String(slot) }, { timeout: 90000 });
         const ms = Date.now() - t0;
-        res.json({ ok: true, slot: parseInt(slot), name: link.name, type: kind, results: (result.data && result.data.results) ? result.data.results.length : 0, ms });
+        /* v4.7.7: the endpoints do NOT share a body field (/search →
+         * images, /video → videos, /gif → gifs) — the old code read
+         * only `results` and every kind reported 0. All endpoints carry
+         * `count`. */
+        const payload = result.data || {};
+        const list = payload.results || payload.videos || payload.gifs || payload.images || payload.music || [];
+        const n = Number.isFinite(payload.count) ? payload.count : list.length;
+        res.json({ ok: true, slot: parseInt(slot), name: link.name, type: kind, results: n, ms });
     } catch (e) {
         res.json({ ok: false, slot: req.body && req.body.slot, error: e.message, ms: 0 });
     }
@@ -486,24 +519,12 @@ app.post('/search-video', dataApi, async (req, res) => {
                 version: '4.7.6'
             });
         }
-        slots = picked.slots;
-        const found = [];
-        await Promise.all(slots.map(async (link) => {
-            try {
-                const url = myLinkUrl(link, searchQuery);
-                const html = await Promise.race([
-                    utils.fetchPage(url),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
-                ]);
-                const re = /https?:\/\/[^"'\s<>\\]+\.(?:mp4|webm)(?:\?[^"\s'<>\\]*)?/gi;
-                const urls = [...new Set((String(html).match(re) || []).map(u => u.replace(/&amp;/g, '&')))]
-                    .filter(u => !utils.isJunkImageUrl(u));
-                diagRecord(String(link.url), urls.length, urls.length ? null : '0 video links in static HTML');
-                found.push(...urls);
-            } catch (e) {
-                diagRecord(String(link.url), 0, e.message);
-            }
-        }));
+        /* v4.7.7: ONE slot engine — this route carried its own inline copy
+         * with a 15s static race and NO app-shell render-through, so
+         * JS-walled slots (beeg…) always read 0 here even after the main
+         * engine was fixed. tryMyLinks runs the hardened ladder + stealth
+         * render-through for every caller. */
+        const found = await tryMyLinks(searchQuery, 'video', extraLinks, { slots: picked.slots });
         const videos = [...new Set(found)].slice(0, 30);
 
         res.json({
