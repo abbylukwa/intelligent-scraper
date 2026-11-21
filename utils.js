@@ -153,8 +153,12 @@ async function fetchViaCycleTLS(url, extraHeaders = {}){
  * /admin routes (URL kept private) with an optional shared secret
  * (STEALTH_FETCH_TOKEN here ↔ STEALTH_TOKEN on the bot). */
 async function fetchViaStealthService(url){
-    const base = process.env.STEALTH_FETCH_URL;
-    if (!base) throw new Error('stealth service not configured');
+    /* v4.7.4: DEFAULT = the bot's /stealth-fetch endpoint — the bot is
+     * our own service and its stealth Chrome already solves the
+     * yona-yethuu challenge live (148KB real HTML). STEALTH_FETCH_URL
+     * overrides; STEALTH_FETCH_TOKEN pairs with STEALTH_TOKEN on the
+     * bot when the owner wants the shared secret on. */
+    const base = process.env.STEALTH_FETCH_URL || 'https://whatsapp-qr-app-1.onrender.com/stealth-fetch';
     const r = await axios.post(String(base).replace(/\/+$/, ''), {
         url: url
     }, {
