@@ -205,7 +205,20 @@ function filterVideoSlots(slots, site){
 // media URLs found. A dead link NEVER breaks a search — each slot
 // fails independently, is skipped and logged.
 async function tryMyLinks(query, type, extraLinks, opts = {}) {
-    const slots = (opts && opts.slots) || getMyLinks(type, extraLinks);
+    let slots = (opts && opts.slots) || getMyLinks(type, extraLinks);
+    /* v4.7.7: generic per-slot targeting (site:<number|name>) — the bot
+     * can pin a search to ONE slot for any media kind, and /test-site
+     * reports per-slot truth for images/gifs/music too. */
+    if (opts && opts.site != null && opts.site !== 'auto'){
+        const pick = String(opts.site).trim();
+        if (/^\d+$/.test(pick)) slots = slots.filter(s => String(s.slot) === pick);
+        else {
+            const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const p = norm(pick);
+            const hit = slots.filter(s => norm(s.name).includes(p) || String(s.url).toLowerCase().includes(pick.toLowerCase()));
+            if (hit.length) slots = hit;
+        }
+    }
     if (!slots.length) return [];
     const found = [];
     await Promise.all(slots.map(async (link) => {
@@ -463,7 +476,8 @@ app.post('/search', dataApi, async (req, res) => {
         console.log(`Searching images for: "${searchQuery}" (site=${site})`);
 
         // MY LINKS: your sites (file + env + request) are the ONLY source
-        const myUrls = await tryMyLinks(searchQuery, 'image', req.body?.myLinks);
+        const myUrls = await tryMyLinks(searchQuery, 'image', req.body?.myLinks,
+            { site: (site && site !== 'auto') ? site : null });
         if (myUrls.length) console.log(`[search] ${myUrls.length} image(s) from MY LINKS — placed FIRST`);
 
         const allUrls = [...new Set(myUrls)];
@@ -681,7 +695,7 @@ app.get('/album/:albumId/next', async (req, res) => {
 // GIF search — v3.0: EXCLUSIVELY from your gif-type MyLinks slots
 app.get('/gif', dataApi, async (req, res) => {
     try {
-        const { q } = req.query;
+        const { q, site: gifSite } = req.query;
 
         if (!q || q.trim() === '') {
             return res.status(400).json({
@@ -695,7 +709,8 @@ app.get('/gif', dataApi, async (req, res) => {
         // MY LINKS: your GIF sites (hot-reloaded file + env + request)
         const extraGifLinks = String(req.query.myLinks || '')
             .split(/[\n,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s));
-        const myGifs = await tryMyLinks(q, 'gif', extraGifLinks);
+        const myGifs = await tryMyLinks(q, 'gif', extraGifLinks,
+            { site: (gifSite && gifSite !== 'auto') ? gifSite : null });
 
         let allGifs = [...new Set(myGifs)];
         /* FINAL RELEVANCE PASS: floats on-topic slugs to the very front */
