@@ -66,10 +66,11 @@
   },
   {
    "slot": 5,
-   "type": "gif",
+   "type": "image",
    "name": "DarkNaija Nude Pictures (HD)",
    "url": "https://darknaija.com/category/nude-pictures/",
-   "enabled": true
+   "enabled": true,
+   "note": "retyped: DarkNaija nudes is an image site, was mislabeled gif"
   },
   {
    "slot": 6,
@@ -97,7 +98,8 @@
    "type": "gif",
    "name": "RedGIFs (HD Loops)",
    "url": "https://www.redgifs.com/browse?search_text={query}",
-   "enabled": true
+   "enabled": false,
+   "note": "CF-challenges the stealth browser >200s — disabled (honest); other gif slots cover loops"
   },
   {
    "slot": 10,
@@ -118,7 +120,8 @@
    "type": "gif",
    "name": "SexGifs (HD Loops)",
    "url": "https://sexgifs.com/?s={query}",
-   "enabled": true
+   "enabled": false,
+   "note": "ajax-loaded results invisible to static+render paths — honest disable"
   },
   {
    "slot": 13,
@@ -293,7 +296,8 @@
    "type": "video",
    "name": "PornHub Arabic",
    "url": "https://ar.pornhub.com/video/search?search={query}",
-   "enabled": true
+   "enabled": false,
+   "note": "hard-blocked (CF 403 through every ladder layer) — honest disable"
   },
   {
    "slot": 38,
@@ -377,7 +381,8 @@
    "type": "video",
    "name": "Beeg HD",
    "url": "https://beeg.com/search?query={query}",
-   "enabled": true
+   "enabled": false,
+   "note": "beeg search SPA needs auth even when rendered — honest disable"
   },
   {
    "slot": 50,
@@ -440,7 +445,8 @@
    "type": "video",
    "name": "SpankBang SA (ladder)",
    "url": "https://spankbang.com/s/south+african/",
-   "enabled": true
+   "enabled": false,
+   "note": "hard-blocked (CF 403 through every ladder layer) — honest disable"
   },
   {
    "slot": 60,

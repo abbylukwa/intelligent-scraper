@@ -604,16 +604,25 @@ async function myLinksVideoRanked(slots, query, opts = {}) {
     /* one slot → scrape its search page → candidate list (no downloads) */
     async function huntSlot(slot) {
         const slotName = slot.name || slot.url;
-        const s = await fetchSlotPage(slot.url);
-        const pages = extractVideoPages(s.data, slot.url)
-            .filter(u => !VIDEO_RECENT.includes(u));
-        const directs = extractDirectVideos(s.data);
-        const cands = [
-            ...pages.map(u => ({ url: u, kind: 'page' })),
-            ...directs.map(u => ({ url: u, kind: 'direct' }))
+        let s = await fetchSlotPage(slot.url);
+        const gather = (html) => [
+            ...extractVideoPages(html, slot.url).filter(u => !VIDEO_RECENT.includes(u)).map(u => ({ url: u, kind: 'page' })),
+            ...extractDirectVideos(html).map(u => ({ url: u, kind: 'direct' }))
         ].filter(c => { if (seen.has(c.url)) return false; seen.add(c.url); return true; })
          /* v4.4: operator plan kills off-topic candidates at the door */
          .filter(c => relevance.planSurvives(c.url, plan));
+        let cands = gather(s.data);
+        /* v4.7.7d APP-SHELL RENDER-THROUGH in the ranked flow too — JS-walled
+         * search pages (beeg…) read 0 candidates from the static shell;
+         * re-render through the stealth browser and gather once more. */
+        if (!cands.length && looksLikeAppShell(s.data)){
+            console.log('[render-through] ' + slotName + ' — app-shell in ranked flow, re-rendering…');
+            try {
+                const html2 = await stealthFetchHTML(slot.url);
+                cands = gather(html2);
+                if (cands.length) console.log('[render-through] ' + slotName + ' — rendered ' + cands.length + ' candidates');
+            } catch (e2) { console.log('[render-through] ' + slotName + ' — failed: ' + e2.message); }
+        }
         return { slotName, cands };
     }
 

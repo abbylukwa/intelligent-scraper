@@ -193,7 +193,12 @@ async function fetchViaStealthService(url){
      * browser; the second rides a warm one with the clearance cookie. */
     const base = process.env.STEALTH_FETCH_URL || 'https://whatsapp-qr-app-1.onrender.com/stealth-fetch';
     let lastErr = null;
-    for (let attempt = 0; attempt < 2; attempt++){
+    /* v4.7.7d: THREE attempts + short backoff — the bot idles its stealth
+     * browser out after 2min (free-tier memory), and the first request
+     * during the respawn window answers 503 in <1s. Attempt 2 rides the
+     * fresh browser (proven live: beeg 200 in 26.6s after a 503). */
+    for (let attempt = 0; attempt < 3; attempt++){
+        if (attempt) await new Promise(r => setTimeout(r, 2500));
         try {
             const r = await axios.post(String(base).replace(/\/+$/, ''), {
                 url: url
