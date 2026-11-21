@@ -157,20 +157,28 @@ async function fetchViaStealthService(url){
      * our own service and its stealth Chrome already solves the
      * yona-yethuu challenge live (148KB real HTML). STEALTH_FETCH_URL
      * overrides; STEALTH_FETCH_TOKEN pairs with STEALTH_TOKEN on the
-     * bot when the owner wants the shared secret on. */
+     * bot when the owner wants the shared secret on. TWO attempts:
+     * the first pass may lose the challenge-round race from a cold
+     * browser; the second rides a warm one with the clearance cookie. */
     const base = process.env.STEALTH_FETCH_URL || 'https://whatsapp-qr-app-1.onrender.com/stealth-fetch';
-    const r = await axios.post(String(base).replace(/\/+$/, ''), {
-        url: url
-    }, {
-        timeout: 90000,
-        validateStatus: () => true,
-        ...(process.env.STEALTH_FETCH_TOKEN ? { headers: { 'x-bb-token': process.env.STEALTH_FETCH_TOKEN } } : {})
-    });
-    const body = r.data || {};
-    if (!body.ok || typeof body.html !== 'string'){
-        throw new Error('stealth service failed: ' + (body.error || ('http ' + r.status)));
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++){
+        try {
+            const r = await axios.post(String(base).replace(/\/+$/, ''), {
+                url: url
+            }, {
+                timeout: 150000,
+                validateStatus: () => true,
+                ...(process.env.STEALTH_FETCH_TOKEN ? { headers: { 'x-bb-token': process.env.STEALTH_FETCH_TOKEN } } : {})
+            });
+            const body = r.data || {};
+            if (!body.ok || typeof body.html !== 'string'){
+                throw new Error('stealth service failed: ' + (body.error || ('http ' + r.status)));
+            }
+            return { status: 200, html: body.html };
+        } catch (e) { lastErr = e; }
     }
-    return { status: 200, html: body.html };
+    throw (lastErr || new Error('stealth service failed'));
 }
 
 async function fetchViaFlareSolverr(url){

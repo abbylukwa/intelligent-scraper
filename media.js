@@ -39,12 +39,15 @@ const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (
  * search: axios → Chrome TLS impersonation → FlareSolverr → bot
  * stealth. Mobile-UA retries kept as the last resort for hosts that
  * 403 the ladder's desktop fingerprint. */
-const { fetchHTMLHardened } = require('./utils');
+const { fetchHTMLHardened, looksBlocked } = require('./utils');
 async function fetchSlotPage(url, referer){
     try {
         const html = await fetchHTMLHardened(url);
         return { status: 200, data: html };
     } catch (e) { /* fall through to legacy retries */ }
+    /* v4.7.4: the legacy retries must REJECT challenge shells — yona-yethuu
+     * answers plain axios with HTTP 200 + "One moment, please…" body, which
+     * used to pass validateStatus(<400) and read as "0 video links". */
     const tries = [MOBILE_UA, UA].map(ua => ({
         'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9',
         ...(referer ? { Referer: referer } : {})
@@ -52,7 +55,10 @@ async function fetchSlotPage(url, referer){
     let lastErr = new Error('ladder failed');
     for (const headers of tries){
         try {
-            return await axios.get(url, { timeout: 20000, maxRedirects: 5, validateStatus: s => s < 400, headers });
+            const resp = await axios.get(url, { timeout: 20000, maxRedirects: 5, validateStatus: s => s < 400, headers });
+            const body = typeof resp.data === 'string' ? resp.data : '';
+            if (looksBlocked(resp.status, body)) throw new Error('challenge shell blocked');
+            return resp;
         } catch (e){ lastErr = e; }
     }
     throw lastErr;
