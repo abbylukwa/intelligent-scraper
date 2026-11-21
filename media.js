@@ -32,18 +32,30 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
  * xvideos ?k= 27 pages · DrTuber 81 direct mp4 · TNAFlix 67 pages ·
  * DaftSex 45 direct mp4 · EPorner 58 pages. Mobile first, desktop retry. */
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+/* v4.7.3: slot page fetches go through the ANTI-BLOCK LADDER — the
+ * video/gif/image chain used to use plain axios here, so challenge
+ * sites (mzansifun, yona-yethuu) fed the extractor a challenge shell
+ * and every such slot read "0 video links". Same ladder as image
+ * search: axios → Chrome TLS impersonation → FlareSolverr → bot
+ * stealth. Mobile-UA retries kept as the last resort for hosts that
+ * 403 the ladder's desktop fingerprint. */
+const { fetchHTMLHardened } = require('./utils');
 async function fetchSlotPage(url, referer){
+    try {
+        const html = await fetchHTMLHardened(url);
+        return { status: 200, data: html };
+    } catch (e) { /* fall through to legacy retries */ }
     const tries = [MOBILE_UA, UA].map(ua => ({
         'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9',
         ...(referer ? { Referer: referer } : {})
     }));
-    let lastErr;
+    let lastErr = new Error('ladder failed');
     for (const headers of tries){
         try {
             return await axios.get(url, { timeout: 20000, maxRedirects: 5, validateStatus: s => s < 400, headers });
         } catch (e){ lastErr = e; }
     }
-    throw lastErr || new Error('fetch failed');
+    throw lastErr;
 }
 
 /* ── Capped download of a direct media URL (shared by everything) ── */
@@ -216,7 +228,11 @@ const VIDEO_PAGE_HINT = /(video|watch|clip|embed|play|media|movie)/i;
  * search…) but are listing pages, not watch pages; their player configs
  * point at the site root or at other listings. Exclude them so real
  * watch pages get the page budget. */
-const NAV_PAGE_RE = /\/(search|playlists?|embed|best|top|new|creators?|categories?|tags?|channels?|users?|profile|login|signup|register|hide_viewed)[a-z0-9_-]*(\/|$)/i;
+/* v4.7.3: added upload/playlist/member/account variants — these nav
+ * pages match the hint ("/upload-video", "/videos?type=featured") but
+ * are listing/upload forms; they were eating the top candidate slots
+ * on mzansifun/mzansiporntube before real watch pages got a turn. */
+const NAV_PAGE_RE = /\/(search|playlists?|embed|best|top|new|creators?|categories?|tags?|channels?|users?|profile|login|signup|register|hide_viewed|upload|members?|account|watch-later|pages?|about|contact|privacy|dmca|faq|advert|category|type=|\?)[a-z0-9_-]*(\/|$|\?|=)/i;
 /* v4.0: CDN preview-loop junk — search pages embed tiny 5s mp4 previews
  * (thumb CDNs); they download "fine" but are not the real video. */
 const VIDEO_JUNK_RE = /preview|thumb|trailer|teaser|sample/i;
@@ -276,6 +292,17 @@ function extractVideoPages(html, baseUrl) {
         const host = new URL(baseUrl).hostname.replace(/^www\./, '');
         const seen = new Set();
         const hits = [];
+        /* v4.7.3: LISTING-PAGE KILLER — tube search pages link /videos,
+         * /videos?type=featured, /search/videos/x BEFORE the real watch
+         * pages, and the relevance sort left them all tied, so the top-6
+         * candidate budget burned entirely on listings ("58 pages, 0
+         * videos" on mzansiporntube). A watch page carries a real slug:
+         * some segment is long, hyphenated or numeric-id-rich. */
+        const isListingPath = (path) => {
+            const segs = path.split('/').filter(Boolean);
+            if (!segs.length) return true;
+            return !segs.some(seg => seg.length >= 10 || (seg.includes('-') && seg.length >= 8) || /^\d{4,}$/.test(seg));
+        };
         const push = (u) => {
             try {
                 const pu = new URL(u.replace(/&amp;/g, '&'), baseUrl);
@@ -284,6 +311,7 @@ function extractVideoPages(html, baseUrl) {
                 if (!VIDEO_PAGE_HINT.test(pu.pathname)) return;
                 if (NAV_PAGE_RE.test(pu.pathname)) return;
                 if (/\.(jpe?g|png|gif|webp|css|js|ico)(\?|$)/i.test(pu.pathname)) return;
+                if (isListingPath(pu.pathname)) return;
                 const abs = pu.href.split('#')[0];
                 if (!seen.has(abs)){ seen.add(abs); hits.push(abs); }
             } catch (e) { /* bad url */ }
@@ -298,7 +326,34 @@ function extractVideoPages(html, baseUrl) {
             if (/^(https?:)?\/\//i.test(m[1])) continue;   // already covered above
             push(m[1]);
         }
-        return hits;
+        /* v4.7.3: WP LEAK-BLOG FALLBACK — blogs like mzansiporn.co.za
+         * name posts without ANY hint word (/2025/11/mzansi-hot-slug/),
+         * so the hint pass scores zero and the whole slot reads dead.
+         * When the hint pass found nothing, collect same-host DEEP
+         * slugs (date paths or 3+ word slugs) minus obvious chrome. */
+        if (!hits.length){
+            const seenSlug = new Set();
+            const collect = (u) => {
+                try {
+                    const pu = new URL(u.replace(/&amp;/g, '&'), baseUrl);
+                    if (pu.protocol !== 'http:' && pu.protocol !== 'https:') return;
+                    if (!pu.hostname.replace(/^www\./, '').endsWith(host)) return;
+                    const path = pu.pathname;
+                    if (!/(\/[a-z0-9-]{3,}\/){2,}|\/[a-z0-9]+-[a-z0-9]+-[a-z0-9]{3,}/i.test(path)) return;   // deep slug only
+                    if (NAV_PAGE_RE.test(path)) return;
+                    if (/\.(jpe?g|png|gif|webp|css|js|ico|xml|json|mp4|webm|zip)(\?|$)/i.test(path)) return;
+                    if (/(feed|xmlrpc|wp-admin|wp-includes|wp-content|comments|author|page\/\d+|attachment|amp(\/|$))/i.test(path)) return;
+                    const abs = pu.href.split('#')[0];
+                    if (!seenSlug.has(abs)){ seenSlug.add(abs); hits.push(abs); }
+                } catch (e) { /* bad url */ }
+            };
+            for (const u of (String(html).match(/https?:\/\/[^\s"'<>\\]+/gi) || [])) collect(u);
+            while ((m = relRe.exec(String(html)))){
+                if (/^(https?:)?\/\//i.test(m[1])) continue;
+                collect(m[1]);
+            }
+        }
+        return hits.slice(0, 60);
     } catch (e) { return []; }
 }
 
@@ -362,6 +417,33 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                         const dv = extractDirectVideos(p.data);
                         dv.forEach(u => hintOf.set(u, vp));
                         cands.push(...pv, ...dv);
+                        /* v4.7.3: FOLLOW IFRAMES — embed players (mzansifun
+                         * /embed/{id} and most tube players) keep the real
+                         * stream inside an iframe; the watch page HTML itself
+                         * has zero mp4 refs. One level deep, first hit wins. */
+                        if (!pv.length && !dv.length){
+                            const iframes = [];
+                            const reIfr = /<iframe[^>]+src=["']([^"']+)["']/gi;
+                            let fm;
+                            while ((fm = reIfr.exec(String(p.data))) !== null){
+                                try {
+                                    const iu = new URL(fm[1].replace(/&amp;/g, '&'), vp);
+                                    if (iu.protocol === 'http:' || iu.protocol === 'https:') iframes.push(iu.href);
+                                } catch (e) { /* bad iframe src */ }
+                                if (iframes.length >= 3) break;
+                            }
+                            for (const iu of iframes){
+                                try {
+                                    const ip = await fetchSlotPage(iu, vp);
+                                    const ipv = extractPlayerVideos(ip.data);
+                                    const idv = extractDirectVideos(ip.data);
+                                    ipv.forEach(u => { strong.add(u); hintOf.set(u, iu); });
+                                    idv.forEach(u => hintOf.set(u, iu));
+                                    cands.push(...ipv, ...idv);
+                                    if (ipv.length || idv.length) break;
+                                } catch (e) { /* next iframe */ }
+                            }
+                        }
                     } catch (e) { /* next page */ }
                 }
             }

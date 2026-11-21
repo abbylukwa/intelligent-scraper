@@ -139,7 +139,7 @@
       "type": "image",
       "name": "MzansiPorn co.za (HD Images)",
       "url": "https://mzansiporn.co.za/?s={query}",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 16,
@@ -195,7 +195,7 @@
       "type": "video",
       "name": "MzansiPorn co.za SA",
       "url": "https://mzansiporn.co.za/?s={query}",
-      "enabled": true
+      "enabled": false
     },
     {
       "slot": 24,
