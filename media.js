@@ -399,10 +399,12 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
     const diag = opts.diag || {};
     const errors = [];
 
+    const videoT0 = Date.now();
     for (const slot of (slots || [])) {
         const slotName = slot.name || slot.url;
+        if (videoDeadline(videoT0)) { errors.push('video budget ' + VIDEO_BUDGET_MS + 'ms reached — remaining slots skipped'); break; }
         try {
-            const s = await fetchSlotPage(slot.url);
+            const s = await fetchSlotPageCapped(slot.url, null, videoT0);
             let cands = extractDirectVideos(s.data);
             const hintOf = new Map();         /* v4.0: url -> best Referer hint */
             for (const u of cands) hintOf.set(u, slot.url);
@@ -415,8 +417,9 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                     .sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words))
                     .slice(0, 6);
                 for (const vp of pageHits) {
+                    if (videoDeadline(videoT0)) break;
                     try {
-                        const p = await fetchSlotPage(vp, slot.url);
+                        const p = await fetchSlotPageCapped(vp, slot.url, videoT0);
                         /* v4.0: player-config urls first (real files), markup mp4s second */
                         const pv = extractPlayerVideos(p.data);
                         pv.forEach(u => { strong.add(u); hintOf.set(u, vp); });
@@ -511,7 +514,11 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
                     console.log(`[video-slot] OK via "${slotName}": ${slugTitleOf(cu)} (${(dl.buf.length / 1048576).toFixed(1)}MB)`);
                     return {
                         mediaUrl: baseUrl + '/temp/' + dl.id + dl.ext,
-                        title: (slugTitleOf(cu) || 'video'),
+                        /* v4.8.1: hash-CDN slugs (xhamster GUIDs) make
+                         * useless WhatsApp captions — fall back to the query */
+                        title: (() => { const t = slugTitleOf(cu) || '';
+                            return (/^[0-9a-f\s-]{8,}$/i.test(t) || !/[a-z\u0600-\u06FF]{3}/i.test(t))
+                                ? (words.length ? words.join(' ') : query) + ' · ' + slotName : t; })(),
                         mimetype: ext === '.webm' ? 'video/webm' : 'video/mp4',
                         kind: 'video',
                         sizeBytes: dl.buf.length,
@@ -533,7 +540,23 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
 /* ── MUSIC from your slots ───────────────────────────────────────
  * For every slot URL: fetch the page → collect direct audio links →
  * rank on-topic → download the first real file (>100KB) → /temp.   */
-const MUSIC_BUDGET_MS = Math.max(30000, parseInt(process.env.MUSIC_BUDGET_MS || '80000', 10));   /* v4.8.0: the bot's /music client timeout is 90s — the slot walk must fit inside it */
+const MUSIC_BUDGET_MS = Math.max(30000, parseInt(process.env.MUSIC_BUDGET_MS || '80000', 10));
+
+/* v4.8.1 VIDEO BUDGET — the bot's video clients wait 90-150s; a single
+ * challenged page (YonaYethuu's "One moment, please") used to eat the
+ * whole hunt. The slot walk now races a deadline and skips stubborn
+ * pages, so healthy SA sites still answer in time. */
+const VIDEO_BUDGET_MS = Math.max(40000, parseInt(process.env.VIDEO_BUDGET_MS || '110000', 10));
+const PAGE_BUDGET_MS  = Math.max(15000, parseInt(process.env.PAGE_BUDGET_MS  || '70000', 10));
+function videoDeadline(startedAt){ return Date.now() - startedAt > VIDEO_BUDGET_MS; }
+function fetchSlotPageCapped(url, referer, startedAt){
+    const left = Math.max(5000, VIDEO_BUDGET_MS - (Date.now() - (startedAt || Date.now())));
+    const cap = Math.min(PAGE_BUDGET_MS, left);
+    return Promise.race([
+        fetchSlotPage(url, referer),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('page budget ' + cap + 'ms — site too slow/challenged')), cap))
+    ]);
+}   /* v4.8.0: the bot's /music client timeout is 90s — the slot walk must fit inside it */
 
 async function myLinksMusic(slots, query, baseUrl, opts = {}) {
     const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
@@ -554,6 +577,51 @@ async function myLinksMusic(slots, query, baseUrl, opts = {}) {
              * video path sorts descending). The old ascending sort tried
              * the LEAST relevant files first — a big fake-songs source. */
             cands.sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words));
+            if (!cands.length && looksLikeAppShell(s.data)) {
+                /* v4.8.1 RENDER-THROUGH — NotJustOk / TrendyBeatz search
+                 * results are client-rendered (nav anchors only, 0 results
+                 * in static HTML). Re-render through the bot's stealth
+                 * Chrome once, race-capped, and re-run the whole harvest
+                 * (direct links + anchor-scored digs). */
+                console.log('[music-slot] app-shell on ' + slotName + ' — render-through…');
+                try {
+                    const html2 = await Promise.race([
+                        stealthFetchHTML(slot.url),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('render budget')), 45000))
+                    ]);
+                    const anchorTexts2 = [];
+                    const reA2 = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,300}?)<\/a>/gi;
+                    let am2;
+                    while ((am2 = reA2.exec(String(html2))) !== null){
+                        try {
+                            const u = new URL(am2[1].replace(/&amp;/g, '&'), slot.url);
+                            if (!/^https?:/.test(u.protocol)) continue;
+                            try { if (new URL(u.href).hostname.replace(/^www\./, '') !== new URL(slot.url).hostname.replace(/^www\./, '')) continue; } catch (e) { continue; }
+                            const text = String(am2[2]).replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+                            if (relevanceScore(text, words) > 0) anchorTexts2.push(u.href);
+                        } catch (e) {}
+                    }
+                    const digPages2 = [...new Set(anchorTexts2)].slice(0, 4);
+                    let found2 = [...new Set((String(html2).match(MUSIC_URL_RE) || []).map(u => u.replace(/&amp;/g, '&')))]
+                        .filter(u => !titleExcluded(slugTitleOf(u)));
+                    if (!found2.length){
+                        for (const pg of digPages2){
+                            try {
+                                const p = await fetchSlotPageCapped(pg, slot.url, Date.now());
+                                const auds = (String(p.data).match(MUSIC_URL_RE) || []).map(u => u.replace(/&amp;/g, '&'));
+                                if (auds.length){ found2 = auds.filter(u => !titleExcluded(slugTitleOf(u))); break; }
+                            } catch (e) {}
+                        }
+                    }
+                    if (found2.length){
+                        diag[slotName] = found2.length;
+                        cands = found2.sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words));
+                        console.log('[music-slot] render-through: ' + found2.length + ' on-topic audio link(s)');
+                    }
+                } catch (e) {
+                    console.log('[music-slot] render-through failed: ' + e.message);
+                }
+            }
             if (!cands.length) {
                 /* v4.8.0 SONG-PAGE DIG — WordPress-style music blogs
                  * (JustNaija, NotJustOk, TrendyBeatz, nex1music…) keep the

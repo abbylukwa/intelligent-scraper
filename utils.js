@@ -197,13 +197,17 @@ async function fetchViaStealthService(url){
      * browser out after 2min (free-tier memory), and the first request
      * during the respawn window answers 503 in <1s. Attempt 2 rides the
      * fresh browser (proven live: beeg 200 in 26.6s after a 503). */
-    for (let attempt = 0; attempt < 3; attempt++){
-        if (attempt) await new Promise(r => setTimeout(r, 2500));
+    /* v4.8.1: 2 attempts x 65s (was 3 x 150s = up to 450s PER PAGE when
+     * the bot's Chrome is cold — that alone blew every client timeout and
+     * made YonaYethuu "not work"). The bot's own render cap is 60s, so a
+     * wait past 65s is a dead instance — fail it and move on. */
+    for (let attempt = 0; attempt < 2; attempt++){
+        if (attempt) await new Promise(r => setTimeout(r, 1500));
         try {
             const r = await axios.post(String(base).replace(/\/+$/, ''), {
                 url: url
             }, {
-                timeout: 150000,
+                timeout: 65000,
                 validateStatus: () => true,
                 ...(process.env.STEALTH_FETCH_TOKEN ? { headers: { 'x-bb-token': process.env.STEALTH_FETCH_TOKEN } } : {})
             });
