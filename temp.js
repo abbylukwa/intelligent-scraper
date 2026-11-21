@@ -102,6 +102,11 @@ function getNextImage(albumId) {
 function cleanup() {
     const now = Date.now();
     const toDelete = [];
+    /* v4.8.0: the route reads result.deletedCount — count what we free
+     * and RETURN it. Old code returned undefined → /cleanup 500'd with
+     * "Cannot read properties of undefined (reading 'deletedCount')". */
+    let deletedCount = 0;
+    let freedBytes = 0;
     for (const [id, entry] of registry) {
         if (id.startsWith('album_')) {
             if (now - entry.timestamp > MAX_AGE_MS) {
@@ -123,7 +128,8 @@ function cleanup() {
     for (const id of toDelete) {
         const entry = registry.get(id);
         if (entry && entry.path) {
-            try { fs.removeSync(entry.path); } catch(e) {}
+            try { freedBytes += entry.size || fs.statSync(entry.path).size || 0; } catch(e) {}
+            try { fs.removeSync(entry.path); deletedCount++; } catch(e) {}
         }
         registry.delete(id);
     }
@@ -133,7 +139,8 @@ function cleanup() {
     const excess = Math.max(0, entries.length - MAX_ITEMS);
     for (let i = 0; i < excess; i++) {
         const [id, entry] = entries[i];
-        try { fs.removeSync(entry.path); } catch(e) {}
+        try { freedBytes += entry.size || fs.statSync(entry.path).size || 0; } catch(e) {}
+        try { fs.removeSync(entry.path); deletedCount++; } catch(e) {}
         registry.delete(id);
     }
     const albumFolders = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith('album_'));
@@ -144,6 +151,7 @@ function cleanup() {
             fs.removeSync(fullPath);
         }
     }
+    return { deletedCount: deletedCount, freedSpaceMB: Number((freedBytes / 1048576).toFixed(2)) };
 }
 
 function getStats() {

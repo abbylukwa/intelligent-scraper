@@ -533,24 +533,94 @@ async function myLinksVideo(slots, query, baseUrl, opts = {}) {
 /* ── MUSIC from your slots ───────────────────────────────────────
  * For every slot URL: fetch the page → collect direct audio links →
  * rank on-topic → download the first real file (>100KB) → /temp.   */
+const MUSIC_BUDGET_MS = Math.max(30000, parseInt(process.env.MUSIC_BUDGET_MS || '80000', 10));   /* v4.8.0: the bot's /music client timeout is 90s — the slot walk must fit inside it */
+
 async function myLinksMusic(slots, query, baseUrl, opts = {}) {
     const words = String(query || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
     const titleExcluded = makeTitleExcluder(opts.exclude);
     const diag = opts.diag || {};
     const errors = [];
 
+    const musicT0 = Date.now();
     for (const slot of (slots || [])) {
         const slotName = slot.name || slot.url;
+        if (Date.now() - musicT0 > MUSIC_BUDGET_MS) { errors.push('music budget ' + MUSIC_BUDGET_MS + 'ms reached — slots skipped'); break; }
         try {
             const s = await fetchSlotPage(slot.url);
             let cands = [...new Set((String(s.data).match(MUSIC_URL_RE) || [])
                 .map(u => u.replace(/&amp;/g, '&')))]
-                .filter(u => !titleExcluded(slugTitleOf(u)))
-                .sort((a, b) => relevanceScore(a, words) - relevanceScore(b, words));
+                .filter(u => !titleExcluded(slugTitleOf(u)));
+            /* v4.8.0: relevance fix — higher score = MORE on-topic (the
+             * video path sorts descending). The old ascending sort tried
+             * the LEAST relevant files first — a big fake-songs source. */
+            cands.sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words));
             if (!cands.length) {
-                diag[slotName] = 0;
-                errors.push(slotName + ': 0 audio links');
-                continue;
+                /* v4.8.0 SONG-PAGE DIG — WordPress-style music blogs
+                 * (JustNaija, NotJustOk, TrendyBeatz, nex1music…) keep the
+                 * direct .mp3 links on the SONG pages, never on the search
+                 * page ("0 media in static HTML (JS-walled?)" for every
+                 * music slot). Open the most on-topic song pages and
+                 * harvest audio URLs there — same pattern the video path
+                 * has used since v4.0. */
+                const host = (() => { try { return new URL(slot.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
+                const pages = (() => {
+                    /* v4.8.0c: score SONG LINKS by their ANCHOR TEXT — the
+                     * visible title in the site's own language (Persian
+                     * queries match Persian anchors even when slugs are
+                     * romanized). Nav listings ("Music", "Home") score 0
+                     * and are refused, so a generic listing can never
+                     * answer a specific artist ask with random songs. */
+                    const host = (() => { try { return new URL(slot.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
+                    const sameHost = (u) => { try { return new URL(u).hostname.replace(/^www\./, '') === host; } catch (e) { return false; } };
+                    const stripTags = (t) => String(t).replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+                    const links = [];
+                    const reA = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,300}?)<\/a>/gi;
+                    let am;
+                    while ((am = reA.exec(String(s.data))) !== null){
+                        try {
+                            const u = new URL(am[1].replace(/&amp;/g, '&'), slot.url);
+                            if (!/^https?:/.test(u.protocol) || !sameHost(u.href)) continue;
+                            let decoded = '';
+                            try { decoded = decodeURIComponent(u.href); } catch (e) { decoded = u.href; }
+                            const text = stripTags(am[2]);
+                            const score = Math.max(relevanceScore(text, words), relevanceScore(decoded, words));
+                            if (score > 0) links.push({ url: u.href, score });
+                        } catch (e) {}
+                    }
+                    return [...new Map(links.map(l => [l.url, l])).values()]
+                        .filter(l => !NAV_PAGE_RE.test(l.url))
+                        .sort((a, b) => b.score - a.score)
+                        .slice(0, 4)
+                        .map(l => l.url);
+                })();
+                for (const pg of pages) {
+                    try {
+                        const p = await fetchSlotPage(pg, slot.url);
+                        const pageAudios = [...new Set([
+                            ...(String(p.data).match(MUSIC_URL_RE) || []),
+                            ...(() => { /* <source>/<audio> tags whose src lacks .mp3 — nex1music-style players */
+                                const out = []; const reSrc = /<(?:source|audio)\b[^>]*\bsrc=["']([^"']+)["']/gi; let m2;
+                                while ((m2 = reSrc.exec(String(p.data))) !== null) {
+                                    try { const au = new URL(m2[1].replace(/&amp;/g, '&'), pg); if (/^https?:/.test(au.protocol) && /audio|mp3|m4a/i.test(m2[0])) out.push(au.href); } catch (e) {}
+                                }
+                                return out;
+                            })()
+                        ].map(u => u.replace(/&amp;/g, '&')))]
+                            .filter(u => !titleExcluded(slugTitleOf(u)))
+                            .filter(u => relevanceScore(u, words) > 0);
+                        if (pageAudios.length) {
+                            diag[slotName] = pageAudios.length;
+                            console.log(`[music-slot] song-page dig: ${pg.slice(0, 80)} → ${pageAudios.length} audio link(s)`);
+                            cands = pageAudios.sort((a, b) => relevanceScore(b, words) - relevanceScore(a, words));
+                            break;
+                        }
+                    } catch (e) { /* next song page */ }
+                }
+                if (!cands.length) {
+                    diag[slotName] = 0;
+                    errors.push(slotName + ': 0 on-topic audio (search page + ' + pages.length + ' song pages)');
+                    continue;
+                }
             }
             for (const cu of cands.slice(0, 5)) {
                 try {
@@ -560,10 +630,15 @@ async function myLinksMusic(slots, query, baseUrl, opts = {}) {
                     const id = temp.saveFile(buf, '.' + ext);
                     MUSIC_RECENT.push(cu); if (MUSIC_RECENT.length > 15) MUSIC_RECENT.shift();
                     diag[slotName] = cands.length;
-                    console.log(`[music-slot] OK via "${slotName}": ${slugTitleOf(cu)} (${(buf.length / 1048576).toFixed(1)}MB)`);
+                    /* v4.8.0: hash-style CDN slugs (Radio Javan "9058-cefcf…")
+                     * make useless titles — fall back to the query itself. */
+                    let songTitle = slugTitleOf(cu) || 'audio';
+                    if (!/[a-z\u0600-\u06FF\u0400-\u04FF\u4E00-\u9FFF]{4}/i.test(String(songTitle).replace(/\d+/g, '')) || /[0-9a-f]{8,}/i.test(songTitle))
+                        songTitle = (words.length ? words.join(' ') : query) + ' · ' + slotName;
+                    console.log(`[music-slot] OK via "${slotName}": ${songTitle} (${(buf.length / 1048576).toFixed(1)}MB)`);
                     return {
                         mediaUrl: baseUrl + '/temp/' + id + '.' + ext,
-                        title: (slugTitleOf(cu) || 'audio'),
+                        title: songTitle,
                         mimetype: ext === 'mp3' ? 'audio/mpeg' : 'audio/' + ext,
                         kind: 'audio',
                         sizeBytes: buf.length,

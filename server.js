@@ -27,6 +27,16 @@ const PORT = process.env.PORT || 10000;
 const fs = require('fs');
 const axios = require('axios');
 const utils = require('./utils');
+/* v4.8.0: bounded concurrency + global search budget. The old engine
+ * Promise.alls ALL slots at once — 70+ simultaneous page fetches
+ * spiked RAM past Render's free-tier limit and the response waited
+ * for the SLOWEST slot (~120s), so every 45s bot client timed out
+ * and the user saw "no pics". Slots now run 12-at-a-time and the
+ * whole search returns whatever arrived within the budget. */
+const _pLimit = require('p-limit');              /* v4 ships an ESM build — CJS gets { default } */
+const pLimit = _pLimit.default || _pLimit;
+const SEARCH_CONCURRENCY = Math.max(4, parseInt(process.env.SEARCH_CONCURRENCY || '12', 10));
+const SEARCH_BUDGET_MS   = Math.max(10000, parseInt(process.env.SEARCH_BUDGET_MS || '40000', 10));
 const MY_LINKS_FILE = path.join(__dirname, 'my_links.json');
 
 let MY_LINKS = [];
@@ -221,7 +231,9 @@ async function tryMyLinks(query, type, extraLinks, opts = {}) {
     }
     if (!slots.length) return [];
     const found = [];
-    await Promise.all(slots.map(async (link) => {
+    const limit = pLimit(SEARCH_CONCURRENCY);
+    await Promise.race([
+        Promise.all(slots.map((link) => limit(async () => {
         try {
             const url = myLinkUrl(link, query);
             /* JSON SLOTS: a slot pointing at a .json API endpoint is
@@ -308,7 +320,10 @@ async function tryMyLinks(query, type, extraLinks, opts = {}) {
             diagRecord(String(link.url), 0, e.message);
             console.log(`MY LINKS: "${link.name || link.url}" skipped (${e.message}) — check /my-links diagnostics`);
         }
-    }));
+        }))),
+        new Promise((resolve) => setTimeout(resolve, SEARCH_BUDGET_MS))
+            .then(() => console.log(`MY LINKS: ${SEARCH_BUDGET_MS}ms budget reached — returning ${found.length} result(s); slow slots keep loading for the next request`))
+    ]);
     return found;
 }
 
@@ -509,6 +524,7 @@ app.post('/search', dataApi, async (req, res) => {
         });
     }
 });
+// v4.8.0 marker — search engine: bounded + budgeted
 
 // Search videos — v3.1: direct video links scraped from YOUR slots.
 // Optional "site" picks ONE video site (name piece / slot number).
