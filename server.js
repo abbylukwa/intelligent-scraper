@@ -917,25 +917,6 @@ app.get('/video-sites', dataApi, (req, res) => {
         version: '4.7.7'
     });
 
-// ─── v4.8.2: per-type site lists — the bot's !picsites / !gifsites /
-// !musicsites call these; only /video-sites existed before, so those
-// commands answered "No sites configured" forever. Same shape as
-// /video-sites ({success, defaultFirst, sites:[{pick,slot,name,url}]}).
-function slotSitesHandler(type){
-    return (req, res) => {
-        loadMyLinks(false);
-        const slots = getMyLinks(type, [], type);
-        res.json({
-            success: true,
-            defaultFirst: slots.length ? (slots[0].name || slots[0].url) : null,
-            sites: slots.map((s, i) => ({ pick: i + 1, slot: s.slot, name: s.name || s.url, url: s.url })),
-            version: '4.8.2'
-        });
-    };
-}
-app.get('/image-sites', dataApi, slotSitesHandler('image'));
-app.get('/gif-sites', dataApi, slotSitesHandler('gif'));
-app.get('/music-sites', dataApi, slotSitesHandler('music'));
 
 });
 

@@ -159,6 +159,34 @@
       "enabled": true
     },
     {
+      "slot": 26,
+      "type": "video",
+      "name": "DarkNaija Africa",
+      "url": "https://www.darknaija.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 27,
+      "type": "video",
+      "name": "NaijaTape Africa",
+      "url": "https://naijatape.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 28,
+      "type": "video",
+      "name": "NaijaXxx Africa",
+      "url": "https://naijaxx.com/?s={query}",
+      "enabled": true
+    },
+    {
+      "slot": 29,
+      "type": "video",
+      "name": "AfroPornLeaks Africa",
+      "url": "https://afropornleaks.com/?s={query}",
+      "enabled": true
+    },
+    {
       "slot": 18,
       "type": "video",
       "name": "YonaYethuu SA",
