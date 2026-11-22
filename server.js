@@ -230,6 +230,11 @@ async function tryMyLinks(query, type, extraLinks, opts = {}) {
         }
     }
     if (!slots.length) return [];
+    /* v4.8.2: FILE order leads for every kind — the owner pins priority
+     * (PornPics first for pics, quality by default). Bot-forwarded
+     * request slots (registry/env) land AFTER file slots, so a site
+     * like YonaYethuu only serves when the user actually picks it. */
+    slots = sortSlotsByFileOrder(slots, type);
     const found = [];
     const limit = pLimit(SEARCH_CONCURRENCY);
     await Promise.race([
@@ -912,6 +917,27 @@ app.get('/video-sites', dataApi, (req, res) => {
         version: '4.7.7'
     });
 });
+
+// ─── v4.8.2 PER-KIND SITE LISTS — the boss: "the sites for videos,
+// leaks, GIFs are DIFFERENT". Each kind gets its own numbered picker:
+//   GET /image-sites · /gif-sites · /music-sites  (video already has /video-sites)
+// Picks work per-command: pic <q> site:<#> · gif <q> site:<#> · play <q> site:<#>
+function mySitesHandler(type){
+    return (req, res) => {
+        loadMyLinks(false);
+        const slots = sortSlotsByFileOrder(getMyLinks(type, [], type), type);
+        const seen = new Set(); const sites = [];
+        for (const s of slots){
+            const key = String(s.url || '');
+            if (seen.has(key)) continue; seen.add(key);
+            sites.push({ pick: sites.length + 1, slot: s.slot, name: s.name || hostnameName(s.url, 'slot'), url: s.url });
+        }
+        res.json({ success: true, kind: type, defaultFirst: sites.length ? sites[0].name : null, sites, version: '4.8.2' });
+    };
+}
+app.get('/image-sites', dataApi, mySitesHandler('image'));
+app.get('/gif-sites', dataApi, mySitesHandler('gif'));
+app.get('/music-sites', dataApi, mySitesHandler('music'));
 
 // ─── POST /download — BreadBot integration ───────────────────
 // Bot: POST /download {url, kind} -> expects { mediaUrl, title, mimetype, kind, sizeBytes }
