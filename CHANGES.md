@@ -1,5 +1,15 @@
 # Intelligent Scraper — CHANGES
 
+## v4.8.5 — /status VERSION TRUTH (dynamic from package.json) + smoke-verified
+
+1. /status, / and the root hint hardcoded `version: '4.7.7'` since the v4.8
+   line — the live deploy was running v4.8.4 while telling the world 4.7.7
+   (that fossil delayed the OOM diagnosis on 2026-11-25: had /status shown
+   4.8.x immediately, the bot's half-half state would have been clear at a
+   glance). All four spots now read PKG_VERSION = package.json (4.8.5).
+2. Live boot smoke: /status → "version":"4.8.5"; POST /probe-urls → exact
+   contract JSON (example.com → shell(1KB) verdict). Port cleaned after.
+
 ## v4.8.4 — MERGED DEPLOY: /probe-urls (half-half with the bot) + the already-deployed v4.8.2/v4.8.3 site endpoints
 
 WHY: the boss — "Why is it exceeding memory limit — spare the jobs for the
