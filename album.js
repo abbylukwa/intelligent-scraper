@@ -1,6 +1,7 @@
 const utils = require('./utils');
 const temp = require('./temp');
-const pLimit = require('p-limit');
+const _pLimit = require('p-limit');               /* v4 ships an ESM build — CJS gets { default } */
+const pLimit = _pLimit.default || _pLimit;
 
 // v4.1 FIX: was a plain `{}` — `'x' in ALBUM_MAP` walks the prototype
 // chain, so `'constructor' in ALBUM_MAP` was always true and the
