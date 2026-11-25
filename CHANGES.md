@@ -1,5 +1,33 @@
 # Intelligent Scraper — CHANGES
 
+## v4.8.4 — MERGED DEPLOY: /probe-urls (half-half with the bot) + the already-deployed v4.8.2/v4.8.3 site endpoints
+
+WHY: the boss — "Why is it exceeding memory limit — spare the jobs for the
+intelligent scraper, half half, don't overwhelm." The v4.8 /probe-urls work
+(v92.9.30 companion) had never reached this repo while v4.8.2/v4.8.3 were
+already deployed — this commit merges BOTH so nothing is lost.
+
+1. NEW POST /probe-urls — bulk site probing for the bot's site-health sweep.
+   Body: { urls: ["https://…{query}"], query?, timeout? } →
+   { ok, probed, ms, results: { url: {ok:true,ms} | {ok:false,why} } }.
+   Verdict mirrors the bot's old probeSite: real HTML + >=20KB body + >=10
+   links. Runs on the hardened fetch ladder (utils.fetchHTMLHardened:
+   axios → cycletls → FlareSolverr → bot stealth), p-limit concurrency 4,
+   capped at 200 urls — the sweep burns THIS service's RAM budget, not the
+   bot's 512MB.
+2. Bot side (v92.9.30): the bot's site-health now delegates boot + 6h sweeps
+   here (SCRAPER_URL) and keeps local probing only as a fallback when this
+   service is asleep; the bot's stealth Chrome refuses to spawn when the BOT
+   is under RAM pressure — those fetches ride this service's ladder instead.
+3. Kept intact from the deployed v4.8.2/v4.8.3 (commit history): per-kind
+   site lists (/image-sites /gif-sites /music-sites — the bot's
+   !picsites/!gifsites/!musicsites were hitting 404s), mySitesHandler dedupe,
+   per-kind file-order priority (video defaults led by DarkNaija Africa,
+   yona only on site:yona selection).
+4. CHANGES.md catch-up: v4.8.2 and v4.8.3 were deployed without entries here —
+   item 3 above is their record (from commit messages 96a7d2f, 34715b4,
+   58f335b).
+
 ## v4.3.0 — WEIGHTED RELEVANCE ENGINE + RANKED VIDEO SEARCH (v92 companion)
 
 WHY: the boss called the old results "2% relevant — they don't do

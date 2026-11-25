@@ -484,6 +484,48 @@ dataApi.use((req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized — send Authorization: Bearer <SCRAPER_TOKEN>' });
 });
 
+// ─── v92.9.30 HALF-HALF: bulk site probing (the bot's site-health sweep) ───
+// The bot used to fetch EVERY registry URL itself (boot + 6h sweeps) on the
+// SAME 512MB instance that also runs WhatsApp + Chrome + ffmpeg — that stack
+// blew Render's memory cap. Now the scraper does the network sweep on its OWN
+// RAM budget (hardened fetch ladder, cycletls fingerprints), the bot only
+// stores the verdicts.
+//   POST /probe-urls  { urls: ["https://…{query}"], query?, timeout? }
+//   → { ok, probed, ms, results: { url: {ok:true,ms} | {ok:false,why} } }
+app.post('/probe-urls', dataApi, async (req, res) => {
+    try {
+        const urls = Array.isArray(req.body && req.body.urls)
+            ? req.body.urls.filter(u => typeof u === 'string' && u.length < 500).slice(0, 200)
+            : [];
+        if (!urls.length) return res.status(400).json({ ok: false, error: 'urls[] required' });
+        const query = String((req.body && req.body.query) || 'amateur');
+        const limit = pLimit(4);                       // gentle — avoid 429 walls (module-level pLimit, ESM-normalized)
+        const results = {};
+        const t0 = Date.now();
+        await Promise.all(urls.map(u => limit(async () => {
+            const s0 = Date.now();
+            const target = u.replace(/\{query\}/g, encodeURIComponent(query));
+            try {
+                const html = await utils.fetchHTMLHardened(target);
+                const text = String(html || '');
+                const okHtml = /<html|<!doctype/i.test(text);
+                const big = text.length >= 20000;
+                const links = (text.match(/href="[^"]+"/g) || []).length;
+                results[u] = (okHtml && big && links >= 10)
+                    ? { ok: true, ms: Date.now() - s0 }
+                    : { ok: false, why: !okHtml ? 'not-html'
+                          : (!big ? 'shell(' + Math.round(text.length / 1024) + 'KB)'
+                                 : 'no-links(' + links + ')') };
+            } catch (e) {
+                results[u] = { ok: false, why: String(e.message || 'error').slice(0, 80) };
+            }
+        })));
+        res.json({ ok: true, probed: urls.length, ms: Date.now() - t0, results });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
 // Search images — v3.0: EXCLUSIVELY from your MyLinks slots
 app.post('/search', dataApi, async (req, res) => {
     try {
